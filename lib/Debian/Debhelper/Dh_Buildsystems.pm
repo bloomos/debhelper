@@ -196,6 +196,8 @@ sub buildsystems_init {
 	    "S=s" => \$opt_buildsys,
 	    "buildsystem=s" => \$opt_buildsys,
 
+	    'buildlabel=s' => \$dh{BUILDLABEL},
+
 	    "l" => \$opt_list,
 	    "list" => \$opt_list,
 
@@ -215,6 +217,7 @@ sub buildsystems_init {
 	Debian::Debhelper::Dh_Lib::init(%args);
 	Debian::Debhelper::Dh_Lib::setup_buildenv();
 	set_parallel($max_parallel);
+	$dh{BUILDLABEL} //= 'default';
 }
 
 sub set_parallel {
