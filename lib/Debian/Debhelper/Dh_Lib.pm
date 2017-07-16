@@ -116,6 +116,7 @@ qw(
 	package_multiarch
 	package_section
 	package_arch
+	package_dh_option
 	process_pkg
 	compute_doc_main_package
 	isnative
@@ -958,6 +959,10 @@ sub tmpdir {
 # use, for that package.  (Usually debian/tmp)
 sub default_sourcedir {
 	my ($package) = @_;
+	my $label = package_dh_option($package, 'buildlabel');
+	if (defined($label)) {
+		return "debian/tmp-${label}";
+	}
 
 	return 'debian/tmp';
 }
@@ -1693,7 +1698,9 @@ sub samearch {
 # As a side effect, populates %package_arches and %package_types
 # with the types of all packages (not only those returned).
 my (%package_types, %package_arches, %package_multiarches, %packages_by_type,
-    %package_sections, $sourcepackage, %package_cross_type, %dh_bd_sequences);
+    %package_sections, $sourcepackage, %package_cross_type, %dh_bd_sequences,
+    %packages_binary_fields,
+);
 
 # Resets the arrays; used mostly for testing
 sub resetpackages {
@@ -1930,6 +1937,7 @@ sub _parse_debian_control {
 				my $included_in_build_profile = 1;
 				my $arch = _strip_spaces($field_values{'architecture'} // '');
 				my $cross_type = _strip_spaces($field_values{'x-dh-build-for-type'} // 'host');
+				my %pkg_fields = %field_values;
 
 				# Detect duplicate package names in the same control file.
 				if ($package eq '') {
@@ -1953,6 +1961,7 @@ sub _parse_debian_control {
 				$package_multiarches{$package} = _strip_spaces($field_values{'multi-arch'} // '');
 				$package_sections{$package} = _strip_spaces($field_values{'section'} // $source_section);;
 				$package_cross_type{$package} = $cross_type;
+				$packages_binary_fields{$package} = \%pkg_fields;
 				push(@{$packages_by_type{'all-listed-in-control-file'}}, $package);
 
 				if (defined($build_profiles)) {
@@ -2119,6 +2128,21 @@ sub package_cross_type {
 		return 'host';
 	}
 	return $package_cross_type{$package} // 'host';
+}
+
+# Returns the value of a "X-DH-${field}" field from d/control when given $package + $field.
+# - undef is returned if the field is not set
+# - Dh_Lib normalizes field names to all lowercase, so $field should always be in all lowercase.
+sub package_dh_option {
+	my ($package, $field) = @_;
+	my $full_field_name;
+
+	if (! exists($packages_binary_fields{$package})) {
+		warning("package $package is not in control info");
+		return;
+	}
+	$full_field_name = "x-dh-${field}";
+	return $packages_binary_fields{$package}{$full_field_name};
 }
 
 # Return true if a given package is really a udeb.
