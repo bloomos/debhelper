@@ -128,8 +128,12 @@ if (defined($dh{SOURCEDIR})) {
 	# Special-case where every thing is installed directly into the
 	# package directory.
 	exit 0 if scalar(getpackages()) == 1;
-	exit 0 if not -d 'debian/tmp';
-	push(@source_dirs, 'debian/tmp');
+	my %seen;
+	for my $package (@{$dh{DOPACKAGES}}) {
+		my $srcdir = default_sourcedir($package);
+		next if $seen{$srcdir}++;
+		push(@source_dirs, $srcdir) if -d $srcdir;
+	}
 }
 
 for my $file (glob('debian/.debhelper/generated/*/installed-by-*')) {
