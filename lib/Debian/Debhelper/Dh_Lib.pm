@@ -960,7 +960,7 @@ sub tmpdir {
 sub default_sourcedir {
 	my ($package) = @_;
 	my $label = package_dh_option($package, 'buildlabel') // 'default';
-	my $label_file = "debian/.debhelper/buildlabels/${label}/install-dir";
+	my $label_file = "debian/.debhelper/_buildlabels/${label}/install-dir";
 	if (-f $label_file) {
 		my $dest_dir;
 		open(my $fd, '<', $label_file) or error("open($label_file): $!");

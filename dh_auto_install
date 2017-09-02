@@ -109,7 +109,7 @@ if (compat(10)) {
 
 buildsystems_do("install", $destdir);
 
-my $label_dir = "debian/.debhelper/buildlabels/$dh{BUILDLABEL}";
+my $label_dir = "debian/.debhelper/_buildlabels/$dh{BUILDLABEL}";
 if (defined($orig_dest_dir)) {
 	# only set this, if we are not using the default
 	install_dir($label_dir);
