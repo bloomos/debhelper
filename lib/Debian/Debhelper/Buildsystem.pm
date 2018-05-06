@@ -11,15 +11,26 @@ use warnings;
 use Cwd ();
 use File::Spec;
 use Debian::Debhelper::Dh_Lib;
+use Debian::Debhelper::Dh_Buildsystems qw(load_buildsystem);
 
 # Build system name. Defaults to the last component of the class
 # name. Do not override this method unless you know what you are
 # doing.
 sub NAME {
-	my $this=shift;
-	my $class = ref($this) || $this;
+	my ($this) = @_;
+	my $class = ref($this);
+	my $target_name;
+	if ($class) {
+		if ($this->IS_GENERATOR_BUILD_SYSTEM) {
+			$target_name = $this->{'targetbuildsystem'}->NAME;
+		}
+	} else {
+		$class = $this;
+	}
 	if ($class =~ m/^.+::([^:]+)$/) {
-		return $1;
+		my $name = $1;
+		return "${name}+${target_name}" if defined($target_name);
+		return $name;
 	}
 	else {
 		error("ınvalid build system class name: $class");
@@ -37,6 +48,43 @@ sub DEFAULT_BUILD_DIRECTORY {
 	"obj-" . dpkg_architecture_value("DEB_HOST_GNU_TYPE");
 }
 
+# Return 1 if the build system generator
+sub IS_GENERATOR_BUILD_SYSTEM {
+	return 0;
+}
+
+# Generator build-systems only
+# The name of the supported target systems.  The first one is
+# assumed to be the default if DEFAULT_TARGET_BUILD_SYSTEM is
+# not overridden.
+sub SUPPORTED_TARGET_BUILD_SYSTEMS {
+	error("class lacking SUPPORTED_TARGET_BUILD_SYSTEMS");
+}
+
+# Generator build-systems only
+# Name of default target build system if target is unspecified
+#  (e.g. --buildsystem=cmake instead of cmake+makefile).
+sub DEFAULT_TARGET_BUILD_SYSTEM {
+	my ($this) = @_;
+	my @targets = $this->SUPPORTED_TARGET_BUILD_SYSTEMS;
+	# Assume they are listed in order.
+	return $targets[0];
+}
+
+# For regular build systems, the same as DESCRIPTION
+# For generator based build systems, the DESCRIPTION of the generator build
+# system + the target build system.  Do not override this method unless you
+# know what you are doing.
+sub FULL_DESCRIPTION {
+	my ($this) = @_;
+	my $description = $this->DESCRIPTION;
+	return $description if not exists($this->{'targetbuildsystem'});
+	my $target_build_system = $this->{'targetbuildsystem'};
+	return $description if not defined($target_build_system);
+	my $target_desc = $target_build_system->FULL_DESCRIPTION;
+	return "${description} combined with ${target_desc}";
+}
+
 # Constructs a new build system object. Named parameters:
 # - sourcedir-     specifies source directory (relative to the current (top)
 #                  directory) where the sources to be built live. If not
@@ -46,6 +94,8 @@ sub DEFAULT_BUILD_DIRECTORY {
 #                  DEFAULT_BUILD_DIRECTORY directory will be used.
 # - parallel -     max number of parallel processes to be spawned for building
 #                  sources (-1 = unlimited; 1 = no parallel)
+# - targetbuildsystem -     The target build system for generator based build
+#                           systems.  Only set for generator build systems.
 # Derived class can override the constructor to initialize common object
 # parameters. Do NOT use constructor to execute commands or otherwise
 # configure/setup build environment. There is absolutely no guarantee the
@@ -58,6 +108,7 @@ sub new {
 	                   builddir => undef,
 	                   parallel => undef,
 	                   cwd => Cwd::getcwd() }, $class);
+	my $target_bs_name;
 
 	if (exists $opts{sourcedir}) {
 		# Get relative sourcedir abs_path (without symlinks)
@@ -73,6 +124,19 @@ sub new {
 	if (defined $opts{parallel}) {
 		$this->{parallel} = $opts{parallel};
 	}
+	if (exists $opts{targetbuildsystem}) {
+		$target_bs_name = $opts{targetbuildsystem};
+	}
+
+	$target_bs_name //= $this->DEFAULT_TARGET_BUILD_SYSTEM if $this->IS_GENERATOR_BUILD_SYSTEM;
+
+	if (defined($target_bs_name)) {
+		my %target_opts = %opts;
+		delete($target_opts{'targetbuildsystem'});
+		my $target_system = load_buildsystem($target_bs_name, undef, %target_opts);
+		$this->set_targetbuildsystem($target_system);
+	}
+
 	return $this;
 }
 
@@ -101,7 +165,40 @@ sub _set_builddir {
 		}
 	}
 	$this->{builddir} = $builddir;
+	# Use get as guard because this method is (also) called from the
+	# constructor before the target build system is setup.
+	if ($this->get_targetbuildsystem) {
+		$this->get_targetbuildsystem->{builddir} = $builddir;
+	};
 	return $builddir;
+}
+
+sub set_targetbuildsystem {
+	my ($this, $target_system) = @_;
+	my $ok = 0;
+	my $target_bs_name = $target_system->NAME;
+	if (not $this->IS_GENERATOR_BUILD_SYSTEM) {
+		my $name = $this->NAME;
+		error("Cannot set a target build system: Buildsystem ${name} is not a generator build system");
+	}
+	for my $supported_bs_name ($this->SUPPORTED_TARGET_BUILD_SYSTEMS) {
+		if ($supported_bs_name eq $target_bs_name) {
+			$ok = 1;
+			last;
+		}
+	}
+	if (not $ok) {
+		my $name = $this->NAME;
+		error("Buildsystem ${name} does not support ${target_bs_name} as target build system.");
+	}
+	$this->{'targetbuildsystem'} = $target_system
+}
+
+# Returns the target build system if it is provided
+sub get_targetbuildsystem {
+	my $this = shift;
+	return if not exists($this->{'targetbuildsystem'});
+	return $this->{'targetbuildsystem'};
 }
 
 # This instance method is called to check if the build system is able
@@ -137,6 +234,11 @@ sub enforce_in_source_building {
 		$this->{warn_insource} = 1;
 		$this->{builddir} = undef;
 	}
+	if ($this->IS_GENERATOR_BUILD_SYSTEM) {
+		$this->get_targetbuildsystem->enforce_in_source_building(@_);
+		# Only warn in once build system.
+		delete($this->{warn_insource});
+	}
 }
 
 # Derived class can call this method in its constructor to *prefer*
@@ -154,6 +256,9 @@ sub prefer_out_of_source_building {
 			# the source directory, building might fail.
 			error("default build directory is the same as the source directory." .
 			      " Please specify a custom build directory");
+		}
+		if ($this->IS_GENERATOR_BUILD_SYSTEM) {
+			$this->get_targetbuildsystem->prefer_out_of_source_building(@_);
 		}
 	}
 }
@@ -263,6 +368,9 @@ sub get_parallel {
 sub disable_parallel {
 	my ($this) = @_;
 	$this->{parallel} = 1;
+	if ($this->IS_GENERATOR_BUILD_SYSTEM) {
+		$this->get_targetbuildsystem->disable_parallel;
+	}
 }
 
 # When given a relative path to the build directory, converts it
@@ -289,6 +397,17 @@ sub mkdir_builddir {
 	if ($this->get_builddir()) {
 		install_dir($this->get_builddir());
 	}
+}
+
+sub check_auto_buildable_clean_oos_buildir {
+	my $this = shift;
+	my ($step) = @_;
+	# This only applies to clean
+	return 0 if $step ne 'clean';
+	my $builddir = $this->get_builddir;
+	# If there is no builddir, then this rule does not apply.
+	return 0 if not defined($builddir) or not -d $builddir;
+	return 1;
 }
 
 sub _cd {
@@ -412,6 +531,9 @@ sub pre_building_step {
 		    " does not support building out of source tree. In source building enforced.");
 		delete $this->{warn_insource};
 	}
+	if ($this->IS_GENERATOR_BUILD_SYSTEM) {
+		$this->get_targetbuildsystem->pre_building_step(@_);
+	}
 }
 
 # Instance method that is called after performing any step (see below).
@@ -420,6 +542,9 @@ sub pre_building_step {
 sub post_building_step {
 	my $this=shift;
 	my ($step)=@_;
+	if ($this->IS_GENERATOR_BUILD_SYSTEM) {
+		$this->get_targetbuildsystem->post_building_step(@_);
+	}
 }
 
 # The instance methods below provide support for configuring,
@@ -430,26 +555,44 @@ sub post_building_step {
 # implement build system specific steps needed to build the
 # source. Arbitrary number of custom step arguments might be
 # passed. Default implementations do nothing.
+#
+# Note: For generator build systems, the default is to
+# delegate the step to the target build system for all
+# steps except configure.
 sub configure {
 	my $this=shift;
 }
 
 sub build {
 	my $this=shift;
+	if ($this->IS_GENERATOR_BUILD_SYSTEM) {
+		$this->get_targetbuildsystem->build(@_);
+	}
 }
 
 sub test {
 	my $this=shift;
+	if ($this->IS_GENERATOR_BUILD_SYSTEM) {
+		$this->get_targetbuildsystem->test(@_);
+	}
 }
 
 # destdir parameter specifies where to install files.
 sub install {
 	my $this=shift;
-	my $destdir=shift;
+	my ($destdir) = @_;
+
+	if ($this->IS_GENERATOR_BUILD_SYSTEM) {
+		$this->get_targetbuildsystem->install(@_);
+	}
 }
 
 sub clean {
 	my $this=shift;
+
+	if ($this->IS_GENERATOR_BUILD_SYSTEM) {
+		$this->get_targetbuildsystem->clean(@_);
+	}
 }
 
 1

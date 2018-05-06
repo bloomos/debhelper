@@ -1,3 +1,65 @@
+debhelper (11.2.1) unstable; urgency=medium
+
+  * Buildsystem.pm: Correctly pass build directory values to
+    target buildsystems.  Thanks to Helmut Grohne, Adrian Bunk
+    and Tobias Frost for the reports and debugging.
+    (Closes: #895174, #895181)
+  * Buildsystems: Avoid choosing a build system for the clean
+    step if it is not necessary.  Previously, debhelper could
+    choose a "random" build system that would prefer building
+    in a separate build directory on the basis that the build
+    directory should be removed.  With this, change we only
+    choose such a build system if there is a build directory
+    to remove.
+
+ -- Niels Thykier <niels@thykier.net>  Sun, 08 Apr 2018 08:47:35 +0000
+
+debhelper (11.2) unstable; urgency=medium
+
+  [ Niels Thykier ]
+  * debhelper.7: Add a ~ to the suggested Build-Depends to ensure
+    backports also work for debhelper with single integer versions.
+    Thanks to Trent W. Buck for the suggestion.  (Closes: #894666)
+  * makefile.pm: Use -Oline with make.  This avoids make mistaking
+    a target name for a value for -O and should make build time
+    outs less likely for "long" targets.  (Closes: #894573)
+  * Dh_Lib.pm: Fix bug that make debhelper trip on packages with
+    the version "0".  Thanks to Chris Lamb for reporting the bug
+    plus debugging the issue.  (Closes: #894895)
+  * Buildsystem.pm: Rewrite to support build systems that generate
+    build files for another build system (without using
+    inheritance).  This enables generator build systems to have
+    multiple backends.
+  * cmake.pm: Support ninja as alternative backend (by using the
+    build system cmake+ninja).  Thanks to Kyle Edwards for the
+    suggestion.  (Closes: #895044)
+  * meson.pm: Rewrite as a generator build system with ninja as
+    the only backend.
+  * debhelper.7: Recommend packagers to use "debian/<pkg>.<file>"
+    over "debian/<file>" in most cases.  Thanks to Johannes
+    Schauer for the suggestion.
+  * dh_usrlocal: Implement a simple guard for directories that
+    will likely cause issues in the shell snippets.
+  * dh_usrlocal: Use the new rules from Debian Policy 4.1.4 to
+    determine the default ownership and mode for directories.
+  * d/control: Bump Standards-Versions to 4.1.4.  Beyond the
+    dh_usrlocal change listed above, no changes were required.
+
+  [ Nicolas Boulenguez ]
+  * dh_installxfonts: Fix typo that causes a misc:Depends on
+    non-existing xfont-utils.  (Closes: #894835)
+  * dh_installwm.1: Document --all.  (Closes: #895011)
+  * dh_usrlocal: Fix bug where the generated prerm script generated
+    by dh_usrlocal could remove a directory directly in /usr/local.
+    (Closes: #894549)
+
+  [ Mattia Rizzolo ]
+  * Lower the version restrictions on dpkg and dpkg-dev.  They are not
+    needed anymore, as R³ support is not implied anymore, but requires
+    an environment variable to be passed.
+
+ -- Niels Thykier <niels@thykier.net>  Sat, 07 Apr 2018 19:23:32 +0000
+
 debhelper (11.1.6~bpo9+1) stretch-backports; urgency=medium
 
   * Rebuild for stretch-backports.
