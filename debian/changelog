@@ -1,3 +1,9 @@
+debhelper (11.2.1~bpo9+1) stretch-backports; urgency=medium
+
+  * Rebuild for stretch-backports.
+
+ -- Niels Thykier <niels@thykier.net>  Sun, 06 May 2018 14:06:00 +0000
+
 debhelper (11.2.1) unstable; urgency=medium
 
   * Buildsystem.pm: Correctly pass build directory values to
