@@ -728,6 +728,16 @@ Changes from v11 are:
 
 =item -
 
+The B<dh_makeshlibs> tool now generates shlibs files with versioned
+dependency by default.  This means that B<-VUpstream-Version>
+(a.k.a. B<-V>) is now the default.
+
+If an unversioned dependency in the shlibs file is wanted, this can be
+obtained by passing B<-VNone> instead.  However, please see
+L<dh_makeshlibs(1)> for the caveat of unversioned dependencies.
+
+=item -
+
 The B<-s> (B<--same-arch>) option is removed.  Please use B<-a> (B<--arch>) instead.
 
 =item -
@@ -780,6 +790,15 @@ if the ELF binary has a SONAME (containing ".so").
 
 The B<dh_compress> tool no longer compresses examples (i.e. anything installed
 in F<</usr/share/doc/I<package>/examples>>.)
+
+=item -
+
+The standard sequence in B<dh> now includes B<dh_dwz> and
+B<dh_installinitramfs> by default.  This makes the B<dwz> and
+B<installinitramfs> sequences obsolete and they will now fail with an
+error.  If you want to skip these commands, then please insert an
+empty override target for them in F<debian/rules>
+(e.g. I<override_dh_dwz:>)
 
 =back
 

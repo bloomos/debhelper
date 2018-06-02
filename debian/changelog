@@ -1,3 +1,135 @@
+debhelper (11.3.2) unstable; urgency=medium
+
+  * dh_installchangelogs: Fix a second regression that made
+    dh_installchangelogs ignore upstream changelogs in the
+    source directories.  Thanks to gregor herrmann for
+    reporting the imcomplete fix.  (Closes: #899248)
+
+ -- Niels Thykier <niels@thykier.net>  Wed, 23 May 2018 05:59:59 +0000
+
+debhelper (11.3.1) unstable; urgency=medium
+
+  * dh_installchangelogs: Fix logic error that made
+    dh_installchangelogs incorrectly ignore explicitly passed
+    changelogs.  Thanks to Sven Joachim and Rene Engelhard
+    for reporting the bug.  (Closes: #899248)
+
+ -- Niels Thykier <niels@thykier.net>  Mon, 21 May 2018 20:02:32 +0000
+
+debhelper (11.3) unstable; urgency=medium
+
+  [ Niels Thykier ]
+  * Buildsystem.pm: Fix use of undefined variable in certain
+    error conditions.
+  * dh_makeshlibs: Support -VUpstream-Version and -VNone as
+    alternative to passing -V or omitting -V respectively.
+  * dh_makeshlibs: Make -VUpstream-Version the default in
+    compat 12 when -V is omitted.  (Closes: #896464)
+  * dh_makeshlibs: Correct handling of an explicit -V when
+    a source builds multiple library packages and provides
+    explicit shlibs files for a subset of them.  Previously,
+    the -V option could have been ignored for some of the
+    packages containing libraries.
+  * Dh_Lib.pm: Fall back to a regular mv(1) when rename fails
+    with EXDEV (cross mount point moves).  This restores
+    debhelper's ability to move files between mount points,
+    which can happen in dh_builddeb has to correct the
+    extension of a binary package built by dpkg-deb.
+    Thanks to Evan Krall for the report.  (Closes: #897569)
+  * dh_missing.1: Consistently mention that dh_missing
+    defaults to --list-missing in compat 12.  Thanks to
+    Robie Basak for spotting the contradicting documentation.
+    (Closes: #898161)
+  * dh_compress:  Avoid adding a duplicate ".gz" extension on
+    a symlink if it already has it.   This can happen e.g. with
+    dh_installman recompresses a manpage that was compressed and
+    had a valid symlink to it.  Thanks to Andreas Hasenack for
+    reporting the bug.  (Closes: LP: #1765851)
+  * debian/control: Depend on dwz for dh_dwz.
+  * dh_dwz: Generate a per-package multifile by default.  This
+    feature can be disabled by --no-dwz-multifile.
+  * dh: Run dh_dwz by default in compat 12.
+  * dh_dwz: Remove warning about the dwz feature being experimental.
+  * dwz.pm: Ditto.
+  * dh_installsystemd: Use the basename of the "tmpfiles" config
+    files.  This makes "systemd-tmpfiles --create" search for it
+    in both /usr/lib/tmpfiles.d and in /etc/tmpfiles.d.  With
+    this change the system administrator can now override the
+    "tmpfiles" config shipped by the package in
+    /usr/libtmpfiles.d.  Thanks to Nick Groenen and Seyeong Kim
+    for filing the bug.  (Closes: #894510)
+  * dh_installinit: Ditto.
+  * dh_installchangelogs: Look for changelog files installed by the
+    upstream build system in the package build dir (i.e. d/<pkg>/
+    and *not* debian/tmp!) and use them in preference to the one in the
+    source package where available.  This avoids some cases of duplicated
+    upstream changelogs.  Thanks to Evgeni Golov for the suggestion.
+    (Closes: #513521)
+  * dh_md5sums: Stop deleting empty md5sums files as dpkg (now) creates
+    the empty file on install if absent.  Thanks to Rhonda D'Vine for
+    suggesting the improvement.  (Closes: #776853)
+  * Dh_Lib.pm: Re-organise exports.
+  * Dh_Lib.pm: Retract "print_and_complex_doit"; the only potential
+    consumer went with a different code snippet.
+  * dh_installinitramfs: New tool to install initramfs hook scripts and
+    handle related maintscripts.  Thanks to Evgeni Golov for the
+    suggestion.  (Closes: #491027)
+  * installinitramfs.pm: New sequence to enable dh_installinitramfs in
+    compat 11 and earlier.
+  * dh_installdirs: Add --(no-)create-in-sourcedir option to make
+    dh_installdirs create directories in the source directory in addition
+    in the package build directory.  Furthermore, dh_installdirs now
+    accepts --sourcedir to overrule the default source directory (just
+    like e.g. dh_install).  Thanks to Robert Luberda for the suggestion.
+    (Closes: #816332)
+  * Buildsystem.pm: Move code from Dh_Buildsystems.pm to Buildsystem.pm
+    to make the latter independent of the former.  This makes it possible
+    to load Buildsystem.pm without debian/control being present.  Thanks
+    to Andreas Tille for the bug report.  (Closes: #897026)
+  * dh_installinit.1: Fix some incorrect markup in the documentation of
+    --no-enable.
+  * makefile.pm: Revert the use of -O/-Oline for make, which helps
+    debugging what commands time out on the buildds.  Thanks to
+    Adrian Bunk for the report.  (Closes: #895196)
+  * dh_testroot.1: Update R³ documentation to reflect the current
+    implementation and not the initial draft.  Thanks to Jens Reyer
+    for reporting the inconsistency.  (Closes: #899125)
+  * d/changelog: Retroactively add Closes for LP bug #1766102 in 11.2
+    release.
+  * Dh_Lib.pm: Correct control parser to permit zero or more leading
+    space after the "Section" field (instead of "exactly one" space).
+  * python_distutils.pm: Deprecate the python-distutils build system
+    and mark it as removed in compat 12.  Users are recommended to
+    migrate to the third-party build system called "pybuild".  This
+    deprecation implies that python3 (among other) will not be
+    supported in the python-distutils build system.
+    (Closes: #568033, #597105, #597342, #769840, #813686, #898347)
+  * Dh_Lib.pm: Remove warning for using "debhelper-compat"
+    build-dependency.
+
+  [ Dmitry Shachnev ]
+  * qmake.pm: Use ${DEB_HOST_GNU_TYPE}-qmake wrapper for
+    cross-compilation.  (Closes: #895286)
+
+  [ Helmut Grohne ]
+  * cmake: Pass CC/CXX environment variables down during native
+    compilation as well. (Closes: #897083)
+
+  [ Chris Lamb ]
+  * dh_listpackages.1: Document that packages are listed in the
+    order that they appear in debian/control.
+    (Closes: #897949)
+
+  [ Peter Pentchev ]
+  * Dh_Lib: Permit leading and trailing whitespace around the
+    debhelper-compat dependency when it is the first or the last
+    relation listed.  (Closes: #897937)
+
+  [ Jakub Wilk ]
+  * dh_usrlocal: Fix invalid POD markup.
+
+ -- Niels Thykier <niels@thykier.net>  Sun, 20 May 2018 20:35:00 +0000
+
 debhelper (11.2.1~bpo9+1) stretch-backports; urgency=medium
 
   * Rebuild for stretch-backports.
@@ -31,7 +163,7 @@ debhelper (11.2) unstable; urgency=medium
     outs less likely for "long" targets.  (Closes: #894573)
   * Dh_Lib.pm: Fix bug that make debhelper trip on packages with
     the version "0".  Thanks to Chris Lamb for reporting the bug
-    plus debugging the issue.  (Closes: #894895)
+    plus debugging the issue.  (Closes: #894895, LP: #1766102)
   * Buildsystem.pm: Rewrite to support build systems that generate
     build files for another build system (without using
     inheritance).  This enables generator build systems to have

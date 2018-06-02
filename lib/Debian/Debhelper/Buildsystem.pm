@@ -11,7 +11,6 @@ use warnings;
 use Cwd ();
 use File::Spec;
 use Debian::Debhelper::Dh_Lib;
-use Debian::Debhelper::Dh_Buildsystems qw(load_buildsystem);
 
 # Build system name. Defaults to the last component of the class
 # name. Do not override this method unless you know what you are
@@ -21,8 +20,10 @@ sub NAME {
 	my $class = ref($this);
 	my $target_name;
 	if ($class) {
-		if ($this->IS_GENERATOR_BUILD_SYSTEM) {
-			$target_name = $this->{'targetbuildsystem'}->NAME;
+		# Do not assume that the target buildsystem has been provided.
+		# NAME could be called during an error in the constructor.
+		if ($this->IS_GENERATOR_BUILD_SYSTEM and $this->get_targetbuildsystem) {
+			$target_name = $this->get_targetbuildsystem->NAME;
 		}
 	} else {
 		$class = $this;
@@ -108,7 +109,23 @@ sub new {
 	                   builddir => undef,
 	                   parallel => undef,
 	                   cwd => Cwd::getcwd() }, $class);
+
+	# Setup the target buildsystem early, so e.g. _set_builddir also
+	# applies to the target build system.  Useful if the generator
+	# and target does not agree on (e.g.) the default build dir.
 	my $target_bs_name;
+	if (exists $opts{targetbuildsystem}) {
+		$target_bs_name = $opts{targetbuildsystem};
+	}
+
+	$target_bs_name //= $this->DEFAULT_TARGET_BUILD_SYSTEM if $this->IS_GENERATOR_BUILD_SYSTEM;
+
+	if (defined($target_bs_name)) {
+		my %target_opts = %opts;
+		delete($target_opts{'targetbuildsystem'});
+		my $target_system =_create_buildsystem_instance($target_bs_name, 1, %target_opts);
+		$this->set_targetbuildsystem($target_system);
+	}
 
 	if (exists $opts{sourcedir}) {
 		# Get relative sourcedir abs_path (without symlinks)
@@ -123,18 +140,6 @@ sub new {
 	}
 	if (defined $opts{parallel}) {
 		$this->{parallel} = $opts{parallel};
-	}
-	if (exists $opts{targetbuildsystem}) {
-		$target_bs_name = $opts{targetbuildsystem};
-	}
-
-	$target_bs_name //= $this->DEFAULT_TARGET_BUILD_SYSTEM if $this->IS_GENERATOR_BUILD_SYSTEM;
-
-	if (defined($target_bs_name)) {
-		my %target_opts = %opts;
-		delete($target_opts{'targetbuildsystem'});
-		my $target_system = load_buildsystem($target_bs_name, undef, %target_opts);
-		$this->set_targetbuildsystem($target_system);
 	}
 
 	return $this;
@@ -236,7 +241,7 @@ sub enforce_in_source_building {
 	}
 	if ($this->IS_GENERATOR_BUILD_SYSTEM) {
 		$this->get_targetbuildsystem->enforce_in_source_building(@_);
-		# Only warn in once build system.
+		# Only warn in one build system.
 		delete($this->{warn_insource});
 	}
 }
@@ -478,14 +483,6 @@ sub doit_in_builddir_noerror {
 	return $this->_generic_doit_in_dir($this->get_buildpath, \&print_and_doit_noerror, @args);
 }
 
-# Changes working directory to the build directory (if needed),
-# calls print_and_complex_doit(@_) and changes working directory back to the
-# top directory.
-sub complex_doit_in_builddir {
-	my ($this, @args) = @_;
-	return $this->_in_dir($this->get_buildpath, \&print_and_complex_doit, @args);
-}
-
 # In case of out of source tree building, whole build directory
 # gets wiped (if it exists) and 1 is returned. If build directory
 # had 2 or more levels, empty parent directories are also deleted.
@@ -593,6 +590,27 @@ sub clean {
 	if ($this->IS_GENERATOR_BUILD_SYSTEM) {
 		$this->get_targetbuildsystem->clean(@_);
 	}
+}
+
+
+sub _create_buildsystem_instance {
+	my ($full_name, $required, %bsopts) = @_;
+	my @parts = split(m{[+]}, $full_name, 2);
+	my $name = $parts[0];
+	my $module = "Debian::Debhelper::Buildsystem::$name";
+	if (@parts > 1) {
+		if (exists($bsopts{'targetbuildsystem'})) {
+			error("Conflicting target buildsystem for ${name} (load as ${full_name}, but target configured in bsopts)");
+		}
+		$bsopts{'targetbuildsystem'} = $parts[1];
+	}
+
+	eval "use $module";
+	if ($@) {
+		return if not $required;
+		error("unable to load build system class '$name': $@");
+	}
+	return $module->new(%bsopts);
 }
 
 1

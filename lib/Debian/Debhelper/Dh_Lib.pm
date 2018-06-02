@@ -7,6 +7,7 @@
 package Debian::Debhelper::Dh_Lib;
 use strict;
 use warnings;
+use utf8;
 
 use constant {
 	# Lowest compat level supported
@@ -31,40 +32,142 @@ use constant {
 	'DBGSYM_PACKAGE_TYPE' => DEFAULT_PACKAGE_TYPE,
 };
 
-use Errno qw(ENOENT);
+use Errno qw(ENOENT EXDEV);
 use Exporter qw(import);
 use File::Glob qw(bsd_glob GLOB_CSH GLOB_NOMAGIC GLOB_TILDE);
 our (@EXPORT, %dh);
-@EXPORT=qw(&init &doit &doit_noerror &complex_doit &verbose_print &error
-            &nonquiet_print &print_and_doit &print_and_doit_noerror
-            &warning &tmpdir &pkgfile &pkgext &pkgfilename &isnative
-	    &autoscript &filearray &filedoublearray &is_build_profile_active
-	    &getpackages &basename &dirname &xargs %dh &process_pkg
-	    &compat &addsubstvar &delsubstvar &excludefile &package_arch
-	    &package_is_arch_all &package_binary_arch &package_declared_arch
-	    &is_udeb &debhelper_script_subst &escape_shell
-	    &inhibit_log &load_log &write_log &commit_override_log
-	    &dpkg_architecture_value &sourcepackage &make_symlink
-	    &is_make_jobserver_unavailable &clean_jobserver_makeflags
-	    &cross_command &set_buildflags &get_buildoption
-	    &install_dh_config_file &error_exitcode &package_multiarch
-	    &install_file &install_prog &install_lib &install_dir
-	    &get_source_date_epoch &is_cross_compiling
-	    &generated_file &autotrigger &package_section
-	    &restore_file_on_clean &restore_all_files
-	    &open_gz &reset_perm_and_owner &deprecated_functionality
-	    &log_installed_files &buildarch &rename_path
-	    &on_pkgs_in_parallel &on_selected_pkgs_in_parallel
-	    &rm_files &make_symlink_raw_target &on_items_in_parallel
-	    XARGS_INSERT_PARAMS_HERE &glob_expand_error_handler_reject
-	    &glob_expand_error_handler_warn_and_discard &glob_expand
-	    &glob_expand_error_handler_silently_ignore DH_BUILTIN_VERSION
-	    &print_and_complex_doit &default_sourcedir &qx_cmd
-	    &compute_doc_main_package &is_so_or_exec_elf_file &hostarch
-	    &assert_opt_is_known_package &dbgsym_tmpdir &find_hardlinks
-	    &should_use_root &gain_root_cmd DEFAULT_PACKAGE_TYPE
-	    DBGSYM_PACKAGE_TYPE
-);
+@EXPORT = (
+	# debhelper basis functionality
+qw(
+	init
+	%dh
+	compat
+),
+	# External command tooling API
+qw(
+	doit
+	doit_noerror
+	qx_cmd
+	xargs
+	XARGS_INSERT_PARAMS_HERE
+	print_and_doit
+	print_and_doit_noerror
+
+	complex_doit
+	escape_shell
+),
+	# Logging/messaging/error handling
+qw(
+	error
+	error_exitcode
+	warning
+	verbose_print
+	nonquiet_print
+),
+	# Package related actions
+qw(
+	getpackages
+	sourcepackage
+	tmpdir
+	dbgsym_tmpdir
+	default_sourcedir
+	pkgfile
+	pkgext
+	pkgfilename
+	package_is_arch_all
+	package_binary_arch
+	package_declared_arch
+	package_multiarch
+	package_section
+	package_arch
+	process_pkg
+	compute_doc_main_package
+	isnative
+	is_udeb
+),
+	# File/path related actions
+qw(
+	basename
+	dirname
+	install_file
+	install_prog
+	install_lib
+	install_dir
+	install_dh_config_file
+	make_symlink
+	make_symlink_raw_target
+	rename_path
+	find_hardlinks
+	rm_files
+	excludefile
+	is_so_or_exec_elf_file
+	is_empty_dir
+	reset_perm_and_owner
+	log_installed_files
+
+	filearray
+	filedoublearray
+	glob_expand
+	glob_expand_error_handler_reject
+	glob_expand_error_handler_warn_and_discard
+	glob_expand_error_handler_silently_ignore
+
+),
+	# Generate triggers, substvars, maintscripts, build-time temporary files
+qw(
+	autoscript
+	autotrigger
+	addsubstvar
+	delsubstvar
+
+	generated_file
+	restore_file_on_clean
+),
+	# Split tasks among different cores
+qw(
+	on_pkgs_in_parallel
+	on_items_in_parallel
+	on_selected_pkgs_in_parallel
+),
+	# R³ framework
+qw(
+	should_use_root
+	gain_root_cmd
+
+),
+	# Architecture, cross-tooling, build options and profiles
+qw(
+	dpkg_architecture_value
+	hostarch
+	cross_command
+	is_cross_compiling
+	is_build_profile_active
+	get_buildoption
+),
+	# Other
+qw(
+	open_gz
+	get_source_date_epoch
+	deprecated_functionality
+),
+	# Special-case functionality (e.g. tool specific), debhelper(-core) functionality and deprecated functions
+qw(
+	inhibit_log
+	load_log
+	write_log
+	commit_override_log
+	debhelper_script_subst
+	is_make_jobserver_unavailable
+	clean_jobserver_makeflags
+	set_buildflags
+	DEFAULT_PACKAGE_TYPE
+	DBGSYM_PACKAGE_TYPE
+	DH_BUILTIN_VERSION
+	assert_opt_is_known_package
+	restore_all_files
+
+	buildarch
+));
 
 # The Makefile changes this if debhelper is installed in a PREFIX.
 my $prefix="/usr";
@@ -421,19 +524,6 @@ sub complex_doit {
 	}			
 }
 
-# Run a command and display the command to stdout except when quiet
-# Use print_and_doit() if you can, instead of this function, because
-# this function forks a shell. However, this function can handle more
-# complicated stuff like redirection.
-sub print_and_complex_doit {
-	nonquiet_print(join(" ",@_));
-
-	if (! $dh{NO_ACT}) {
-		# The join makes system get a scalar so it forks off a shell.
-		system(join(" ", @_)) == 0 || error_exitcode(join(" ", @_))
-	}
-}
-
 
 sub error_exitcode {
 	my $command=shift;
@@ -535,8 +625,16 @@ sub rename_path {
 	}
 	return 1 if $dh{NO_ACT};
 	if (not rename($source, $dest)) {
-		my $files = escape_shell($source, $dest);
-		error("mv $files: $!")
+		my $ok = 0;
+		if ($! == EXDEV) {
+			# Replay with a fork+exec to handle crossing two mount
+			# points (See #897569)
+			$ok = _doit('mv', $source, $dest);
+		}
+		if (not $ok) {
+			my $files = escape_shell($source, $dest);
+			error("mv $files: $!");
+		}
 	}
 	return 1;
 }
@@ -683,6 +781,12 @@ my $compat_from_bd;
 	my $warned_compat = $ENV{DH_INTERNAL_TESTSUITE_SILENT_WARNINGS} ? 1 : 0;
 	my $c;
 
+	# Used mainly for testing
+	sub resetcompat {
+		undef $c;
+		undef $compat_from_bd;
+	}
+
 	sub compat {
 		my $num=shift;
 		my $nowarn=shift;
@@ -708,7 +812,7 @@ my $compat_from_bd;
 						error("debian/compat must contain a positive number (found: \"${new_compat}\")");
 					}
 					if (defined($compat_from_bd) and $compat_from_bd != -1) {
-						warning("Please specific the debhelper compat level exactly once.");
+						warning("Please specify the debhelper compat level exactly once.");
 						warning(" * debian/compat requests compat ${new_compat}.");
 						warning(" * debian/control requests compat ${compat_from_bd} via \"debhelper-compat (= ${compat_from_bd})\"");
 						error("debhelper compat level specified both in debian/compat and via build-dependency on debhelper-compat");
@@ -1380,6 +1484,13 @@ sub is_cross_compiling {
 my (%package_types, %package_arches, %package_multiarches, %packages_by_type,
     %package_sections, $sourcepackage, %package_cross_type);
 
+# Resets the arrays; used mostly for testing
+sub resetpackages {
+	undef $sourcepackage;
+	%package_types = %package_arches = %package_multiarches =
+	    %packages_by_type = %package_sections = %package_cross_type = ();
+}
+
 # Returns source package name
 sub sourcepackage {
 	getpackages() if not defined($sourcepackage);
@@ -1419,15 +1530,15 @@ sub getpackages {
 		s/\s+$//;
 		next if m/^\s*+\#/;
 
-		if (/^Source:\s*(.*)/i) {
+		if (/^Source:\s*+(.*)/i) {
 			$sourcepackage = $1;
 			$bd_field_value = undef;
 			next;
-		} elsif (/^Section:\s(.*)$/i) {
+		} elsif (/^Section:\s*+(.*)$/i) {
 			$source_section = $1;
 			$bd_field_value = undef;
 			next;
-		} elsif (/^(Build-Depends(?:-Arch|-Indep)?):\s*(.*)$/i) {
+		} elsif (/^(Build-Depends(?:-Arch|-Indep)?):\s*+(.*)$/i) {
 			my ($field, $value) = (lc($1), $2);
 			$bd_field_value = [$value];
 			$bd_fields{$field} = $bd_field_value;
@@ -1444,7 +1555,8 @@ sub getpackages {
 		my ($dh_compat_bd, $final_level);
 		for my $field (sort(keys(%bd_fields))) {
 			my $value = join(' ', @{$bd_fields{$field}});
-			$value =~ s/\s*,\s*$//;
+			$value =~ s/^\s*//;
+			$value =~ s/\s*(?:,\s*)?$//;
 			for my $dep (split(/\s*,\s*/, $value)) {
 				if ($dep =~ m/^debhelper-compat\s*[(]\s*=\s*(${PKGVERSION_REGEX})\s*[)]$/) {
 					my $version = $1;
@@ -1481,9 +1593,6 @@ sub getpackages {
 				}
 			}
 		}
-		if (defined($final_level)) {
-			warning("The use of \"debhelper-compat (= ${final_level})\" is experimental and may change (or be retired) without notice");
-		}
 		$compat_from_bd = $final_level // -1;
 	} else {
 		$compat_from_bd = -1;
@@ -1492,7 +1601,7 @@ sub getpackages {
 	while (<$fd>) {
 		chomp;
 		s/\s+$//;
-		if (/^Package:\s*(.*)/i) {
+		if (/^Package:\s*+(.*)/i) {
 			$package=$1;
 			# Detect duplicate package names in the same control file.
 			if (! $seen{$package}) {
@@ -1502,20 +1611,20 @@ sub getpackages {
 				error("debian/control has a duplicate entry for $package");
 			}
 			$included_in_build_profile=1;
-		} elsif (/^Section:\s(.*)$/i) {
+		} elsif (/^Section:\s*+(.*)$/i) {
 			$section = $1;
-		} elsif (/^Architecture:\s*(.*)/i) {
+		} elsif (/^Architecture:\s*+(.*)/i) {
 			$arch=$1;
-		} elsif (/^(?:X[BC]*-)?Package-Type:\s*(.*)/i) {
+		} elsif (/^(?:X[BC]*-)?Package-Type:\s*+(.*)/i) {
 			$package_type=$1;
 		} elsif (/^Multi-Arch:\s*(.*)/i) {
 			$multiarch = $1;
-		} elsif (/^X-DH-Build-For-Type:\s*(.*)/i) {
+		} elsif (/^X-DH-Build-For-Type:\s*+(.*)/i) {
 			$cross_type = $1;
 			if ($cross_type ne 'host' and $cross_type ne 'target') {
 				error("Unknown value of X-DH-Build-For-Type \"$cross_type\" at debian/control:$.");
 			}
-		} elsif (/^Build-Profiles:\s*(.*)/i) {
+		} elsif (/^Build-Profiles:\s*+(.*)/i) {
 			# rely on libdpkg-perl providing the parsing functions
 			# because if we work on a package with a Build-Profiles
 			# field, then a high enough version of dpkg-dev is needed
@@ -2247,6 +2356,23 @@ sub is_so_or_exec_elf_file {
 	my $elf_type_unpacked = unpack($short_format, $elf_type);
 	return 0 if $elf_type_unpacked != ELF_TYPE_EXECUTABLE and $elf_type_unpacked != ELF_TYPE_SHARED_OBJECT;
 	return 1;
+}
+
+# Returns true iff the given argument is an empty directory.
+# Corner-cases:
+#  - false if not a directory
+sub is_empty_dir {
+	my ($dir) = @_;
+	return 0 if not -d $dir;
+	my $ret = 1;
+	opendir(my $dir_fd, $dir) or error("opendir($dir) failed: $!");
+	while (defined(my $entry = readdir($dir_fd))) {
+		next if $entry eq '.' or $entry eq '..';
+		$ret = 0;
+		last;
+	}
+	closedir($dir_fd);
+	return $ret;
 }
 
 sub on_pkgs_in_parallel(&) {
