@@ -1,3 +1,9 @@
+debhelper (11.3.2~bpo9+1) stretch-backports; urgency=medium
+
+  * Rebuild for stretch-backports.
+
+ -- Andreas Tille <tille@debian.org>  Sat, 02 Jun 2018 09:42:20 +0200
+
 debhelper (11.3.2) unstable; urgency=medium
 
   * dh_installchangelogs: Fix a second regression that made
