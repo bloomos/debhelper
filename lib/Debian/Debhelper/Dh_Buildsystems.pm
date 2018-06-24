@@ -297,31 +297,17 @@ sub buildsystems_do {
 			nonquiet_print("More help available with --verbose");
 		} else {
 			verbose_print("The following labels are defined");
-			my %labels;
-			for my $pkg (getpackages()) {
-				my $pkg_label_raw = package_dh_option($pkg, 'buildlabels') // 'default';
-				for my $pkg_label (split(' ', $pkg_label_raw)) {
-					push(@{$labels{$pkg_label}}, $pkg);
-				}
-			}
-			for my $label (sort(keys(%labels))) {
-				verbose_print(" * ${label}: " . join(' ', @{$labels{$label}}));
+			my $labels = Debian::Debhelper::Dh_Lib::packages_by_buildlabel();
+			for my $label (sort(keys(%{$labels}))) {
+				verbose_print(" * ${label}: " . join(' ', @{$labels->{$label}}));
 			}
 		}
 		error("Aborting...");
 	} elsif ($label_match < 1) {
 		nonquiet_print("No packages to be processed for build label \"$dh{BUILDLABEL}\"");
 		if ($dh{VERBOSE}) {
-			my @relevant_pkgs;
-			for my $pkg (getpackages()) {
-				my $pkg_label_raw = package_dh_option($pkg, 'buildlabels') // 'default';
-				for my $label (split(' ', $pkg_label_raw)) {
-					if ($label eq $dh{BUILDLABEL}) {
-						push(@relevant_pkgs, $pkg);
-						last;
-					}
-				}
-			}
+			my $labels = Debian::Debhelper::Dh_Lib::packages_by_buildlabel();
+			my @relevant_pkgs = @{$labels->{$dh{BUILDLABEL}}};
 			verbose_print("The buildlabel \"$dh{BUILDLABEL}\" affects: @relevant_pkgs")
 		}
 		exit 0;

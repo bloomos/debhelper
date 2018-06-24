@@ -2926,6 +2926,21 @@ sub perl_cross_incdir {
 	return $incdir;
 }
 
+{
+	my %packages_by_buildlabel;
+	sub packages_by_buildlabel {
+		return \%packages_by_buildlabel if %packages_by_buildlabel;
+		for my $pkg (getpackages()) {
+			my $pkg_label_raw = package_dh_option($pkg, 'buildlabels') // 'default';
+			for my $pkg_label (split(' ', $pkg_label_raw)) {
+				push(@{$packages_by_buildlabel{$pkg_label}}, $pkg);
+			}
+		}
+		return \%packages_by_buildlabel;
+	}
+}
+
+
 sub is_known_package {
 	my ($package) = @_;
 	state %known_packages = map { $_ => 1 } getpackages();
