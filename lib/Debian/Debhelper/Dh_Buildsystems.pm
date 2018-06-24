@@ -283,8 +283,8 @@ sub buildsystems_do {
 		exit 0;
 	}
 	for my $pkg (getpackages()) {
-		my $pkg_label = package_dh_option($pkg, 'buildlabel') // 'default';
-		next if $pkg_label ne $dh{BUILDLABEL};
+		my $pkg_label_raw = package_dh_option($pkg, 'buildlabels') // 'default';
+		next if not grep { $_ eq $dh{BUILDLABEL} } split(' ', $pkg_label_raw);
 		$label_match = 0;
 		next if not process_pkg($pkg);
 		$label_match = 1;
@@ -299,8 +299,10 @@ sub buildsystems_do {
 			verbose_print("The following labels are defined");
 			my %labels;
 			for my $pkg (getpackages()) {
-				my $pkg_label = package_dh_option($pkg, 'buildlabel') // 'default';
-				push(@{$labels{$pkg_label}}, $pkg);
+				my $pkg_label_raw = package_dh_option($pkg, 'buildlabels') // 'default';
+				for my $pkg_label (split(' ', $pkg_label_raw)) {
+					push(@{$labels{$pkg_label}}, $pkg);
+				}
 			}
 			for my $label (sort(keys(%labels))) {
 				verbose_print(" * ${label}: " . join(' ', @{$labels{$label}}));
@@ -310,9 +312,16 @@ sub buildsystems_do {
 	} elsif ($label_match < 1) {
 		nonquiet_print("No packages to be processed for build label \"$dh{BUILDLABEL}\"");
 		if ($dh{VERBOSE}) {
-			my @relevant_pkgs = grep {
-				(package_dh_option($_, 'buildlabel') // 'default') eq $dh{BUILDLABEL}
-			} getpackages();
+			my @relevant_pkgs;
+			for my $pkg (getpackages()) {
+				my $pkg_label_raw = package_dh_option($pkg, 'buildlabels') // 'default';
+				for my $label (split(' ', $pkg_label_raw)) {
+					if ($label eq $dh{BUILDLABEL}) {
+						push(@relevant_pkgs, $pkg);
+						last;
+					}
+				}
+			}
 			verbose_print("The buildlabel \"$dh{BUILDLABEL}\" affects: @relevant_pkgs")
 		}
 		exit 0;

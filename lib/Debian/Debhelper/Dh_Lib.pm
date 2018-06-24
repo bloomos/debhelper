@@ -959,7 +959,9 @@ sub tmpdir {
 # use, for that package.  (Usually debian/tmp)
 sub default_sourcedir {
 	my ($package) = @_;
-	my $label = package_dh_option($package, 'buildlabel') // 'default';
+	my $label_raw = package_dh_option($package, 'buildlabels') // 'default';
+	# The first label decides the default source directory
+	my $label = (split(' ', $label_raw, 2))[0];
 	my $label_file = "debian/.debhelper/_buildlabels/${label}/install-dir";
 	if (-f $label_file) {
 		my $dest_dir;
