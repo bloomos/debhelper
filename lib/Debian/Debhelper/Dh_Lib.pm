@@ -111,7 +111,7 @@ qw(
 	glob_expand_error_handler_reject
 	glob_expand_error_handler_warn_and_discard
 	glob_expand_error_handler_silently_ignore
-
+	glob_expand_error_handler_reject_nomagic_warn_discard
 ),
 	# Generate triggers, substvars, maintscripts, build-time temporary files
 qw(
@@ -181,6 +181,18 @@ our $PKGVERSION_REGEX = qr/
                  [0-9][0-9A-Za-z.+:~]*       # Upstream version (with no hyphens)
                  (?: - [0-9A-Za-z.+:~]+ )*   # Optional debian revision (+ upstreams versions with hyphens)
                           /xoa;
+
+# From Policy 5.1:
+#
+#  The field name is composed of US-ASCII characters excluding control
+#  characters, space, and colon (i.e., characters in the ranges U+0021
+#  (!) through U+0039 (9), and U+003B (;) through U+007E (~),
+#  inclusive). Field names must not begin with the comment character
+#  (U+0023 #), nor with the hyphen character (U+002D -).
+our $DEB822_FIELD_REGEX = qr/
+	    [\x21\x22\x24-\x2C\x2F-\x39\x3B-\x7F]  # First character
+	    [\x21-\x39\x3B-\x7F]*                  # Subsequent characters (if any)
+    /xoa;
 
 sub init {
 	my %params=@_;
@@ -751,7 +763,8 @@ sub error {
 
 # Output a warning.
 sub warning {
-	my $message=shift;
+	my ($message) = @_;
+	$message //= '';
 	
 	print STDERR basename($0).": $message\n";
 }
@@ -1292,6 +1305,20 @@ sub glob_expand_error_handler_warn_and_discard {
 	return;
 }
 
+# Emulates the "old" glob mechanism; not recommended for new code as
+# it permits some globs expand to nothing with only a warning.
+sub glob_expand_error_handler_reject_nomagic_warn_discard {
+	my ($pattern, $dir_ref) = @_;
+	for my $dir (@{$dir_ref}) {
+		my $full_pattern = "$dir/$pattern";
+		my @matches = bsd_glob($full_pattern, GLOB_CSH & ~(GLOB_TILDE));
+		if (@matches) {
+			goto \&glob_expand_error_handler_reject;
+		}
+	}
+	goto \&glob_expand_error_handler_warn_and_discard;
+}
+
 sub glob_expand_error_handler_silently_ignore {
 	return;
 }
@@ -1335,7 +1362,7 @@ sub filedoublearray {
 		require Cwd;
 		my $cmd=Cwd::abs_path($file);
 		$ENV{"DH_CONFIG_ACT_ON_PACKAGES"} = join(",", @{$dh{"DOPACKAGES"}});
-		open (DH_FARRAY_IN, "$cmd |") || error("cannot run $file: $!");
+		open(DH_FARRAY_IN, '-|', $cmd) || error("cannot run $file: $!");
 		delete $ENV{"DH_CONFIG_ACT_ON_PACKAGES"};
 	}
 	else {
@@ -1374,7 +1401,22 @@ sub filedoublearray {
 
 	if (!close(DH_FARRAY_IN)) {
 		if ($x) {
-			error("Error closing fd/process for $file: $!") if $!;
+			my ($err, $proc_err) = ($!, $?);
+			error("Error closing fd/process for $file: $err") if $err;
+			# The interpreter did not like the file for some reason.
+			# Lets check if the maintainer intended it to be
+			# executable.
+			if (not is_so_or_exec_elf_file($file) and not _has_shbang_line($file)) {
+				warning("$file is marked executable but does not appear to an executable config.");
+				warning();
+				warning("If $file is intended to be an executable config file, please ensure it can");
+				warning("be run as a stand-alone script/program (e.g. \"./${file}\")");
+				warning("Otherwise, please remove the executable bit from the file (e.g. chmod -x \"${file}\")");
+				warning();
+				warning('Please see "Executable debhelper config files" in debhelper(7) for more information.');
+				warning();
+			}
+			$? = $proc_err;
 			error_exitcode("$file (executable config)");
 		} else {
 			error("problem reading $file: $!");
@@ -1512,9 +1554,10 @@ sub getpackages {
 	my $package="";
 	my $arch="";
 	my $section="";
+	my $valid_pkg_re = qr{^${PKGNAME_REGEX}$}o;
 	my ($package_type, $multiarch, %seen, @profiles, $source_section,
 		$included_in_build_profile, $cross_type, $cross_target_arch,
-		%bd_fields, $bd_field_value);
+		%bd_fields, $bd_field_value, %seen_fields);
 	if (exists $ENV{'DEB_BUILD_PROFILES'}) {
 		@profiles=split /\s+/, $ENV{'DEB_BUILD_PROFILES'};
 	}
@@ -1530,25 +1573,47 @@ sub getpackages {
 		s/\s+$//;
 		next if m/^\s*+\#/;
 
-		if (/^Source:\s*+(.*)/i) {
-			$sourcepackage = $1;
-			$bd_field_value = undef;
+		if (/^\s/) {
+			if (not %seen_fields) {
+				error("Continuation line seen before first stanza in debian/control (line $.)");
+			}
+			# Continuation line
+			push(@{$bd_field_value}, $_) if $bd_field_value;
+		} elsif (not $_ and not %seen_fields) {
+			# Ignore empty lines before first stanza
 			next;
-		} elsif (/^Section:\s*+(.*)$/i) {
-			$source_section = $1;
-			$bd_field_value = undef;
-			next;
-		} elsif (/^(Build-Depends(?:-Arch|-Indep)?):\s*+(.*)$/i) {
-			my ($field, $value) = (lc($1), $2);
-			$bd_field_value = [$value];
-			$bd_fields{$field} = $bd_field_value;
-		} elsif (/^\S/) {
-			$bd_field_value = undef;
-		} elsif (/^\s/ and $bd_field_value) {
-			push(@{$bd_field_value}, $_);
+		} elsif ($_) {
+			my ($field_name, $value);
+
+			if (m/^($DEB822_FIELD_REGEX):\s*(.*)/o) {
+				($field_name, $value) = (lc($1), $2);
+				if (exists($seen_fields{$field_name})) {
+					my $first_time = $seen_fields{$field_name};
+					error("${field_name}-field appears twice in the same stanza of debian/control. " .
+						  "First time on line $first_time, second time: $.");
+				}
+				$seen_fields{$field_name} = $.;
+				$bd_field_value = undef;
+			} else {
+				# Invalid file
+				error("Parse error in debian/control, line $., read: $_");
+			}
+			if ($field_name eq 'source') {
+				$sourcepackage = $value;
+				if ($sourcepackage !~ $valid_pkg_re) {
+					error('Source-field must be a valid package name, ' .
+						  "got: \"${sourcepackage}\", should match \"${valid_pkg_re}\"");
+				}
+				next;
+			} elsif ($field_name eq 'section') {
+				$source_section = $value;
+				next;
+			} elsif ($field_name =~ /^(?:build-depends(?:-arch|-indep)?)$/) {
+				$bd_field_value = [$value];
+				$bd_fields{$field_name} = $bd_field_value;
+			}
 		}
-		next if not $_ and not defined($sourcepackage);
-		last if (!$_ or eof); # end of stanza.
+		last if not $_ or eof;
 	}
 	error("could not find Source: line in control file.") if not defined($sourcepackage);
 	if (%bd_fields) {
@@ -1598,50 +1663,97 @@ sub getpackages {
 		$compat_from_bd = -1;
 	}
 
+	%seen_fields = ();
+
 	while (<$fd>) {
 		chomp;
 		s/\s+$//;
-		if (/^Package:\s*+(.*)/i) {
-			$package=$1;
-			# Detect duplicate package names in the same control file.
-			if (! $seen{$package}) {
-				$seen{$package}=1;
-			}
-			else {
-				error("debian/control has a duplicate entry for $package");
-			}
-			$included_in_build_profile=1;
-		} elsif (/^Section:\s*+(.*)$/i) {
-			$section = $1;
-		} elsif (/^Architecture:\s*+(.*)/i) {
-			$arch=$1;
-		} elsif (/^(?:X[BC]*-)?Package-Type:\s*+(.*)/i) {
-			$package_type=$1;
-		} elsif (/^Multi-Arch:\s*(.*)/i) {
-			$multiarch = $1;
-		} elsif (/^X-DH-Build-For-Type:\s*+(.*)/i) {
-			$cross_type = $1;
-			if ($cross_type ne 'host' and $cross_type ne 'target') {
-				error("Unknown value of X-DH-Build-For-Type \"$cross_type\" at debian/control:$.");
-			}
-		} elsif (/^Build-Profiles:\s*+(.*)/i) {
-			# rely on libdpkg-perl providing the parsing functions
-			# because if we work on a package with a Build-Profiles
-			# field, then a high enough version of dpkg-dev is needed
-			# anyways
-			my $build_profiles=$1;
-			eval {
-				require Dpkg::BuildProfiles;
-				my @restrictions=Dpkg::BuildProfiles::parse_build_profiles($build_profiles);
-				if (@restrictions) {
-					$included_in_build_profile=Dpkg::BuildProfiles::evaluate_restriction_formula(\@restrictions, \@profiles);
-				}
-			};
-			if ($@) {
-				error("The control file has a Build-Profiles field. Requires libdpkg-perl >= 1.17.14");
-			}
+		if (m/^\#/) {
+			# Skip unless EOF for the special case where the last line
+			# is a comment line directly after the last stanza.  In
+			# that case we need to "commit" the last stanza as well or
+			# we end up omitting the last package.
+			next if not eof;
+			$_  = '';
 		}
 
+
+		if (/^\s/) {
+			# Continuation line
+			if (not %seen_fields) {
+				error("Continuation line seen outside stanza in debian/control (line $.)");
+			}
+		} elsif (not $_ and not %seen_fields) {
+			# Ignore empty lines before first stanza
+			next;
+		} elsif ($_) {
+			my ($field_name, $value);
+
+			if (m/^($DEB822_FIELD_REGEX):\s*(.*)/o) {
+				($field_name, $value) = (lc($1), $2);
+				if (exists($seen_fields{$field_name})) {
+					my $first_time = $seen_fields{$field_name};
+					error("${field_name}-field appears twice in the same stanza of debian/control. " .
+						  "First time on line $first_time, second time: $.");
+				}
+				$seen_fields{$field_name} = $.;
+				$bd_field_value = undef;
+			} else {
+				# Invalid file
+				error("Parse error in debian/control, line $., read: $_");
+			}
+
+			if ($field_name eq 'package') {
+				$package = $value;
+				# Detect duplicate package names in the same control file.
+				if (! $seen{$package}) {
+					$seen{$package}=1;
+				} else {
+					error("debian/control has a duplicate entry for $package");
+				}
+				if ($package !~ $valid_pkg_re) {
+					error('Package-field must be a valid package name, ' .
+						  "got: \"${package}\", should match \"${valid_pkg_re}\"");
+				}
+				$included_in_build_profile=1;
+			} elsif ($field_name eq 'section') {
+				$section = $value;
+			} elsif ($field_name eq 'architecture') {
+				$arch = $value;
+			} elsif ($field_name =~ m/^(?:x[bc]*-)?package-type$/) {
+				if (defined($package_type)) {
+					my $help = "(issue seen prior \"Package\"-field)";
+					$help = "for package ${package}" if $package;
+					error("Multiple definitions of (X-)Package-Type in line $. ${help}");
+				}
+				$package_type = $value;
+			} elsif ($field_name eq 'multi-arch') {
+				$multiarch = $value;
+			} elsif ($field_name eq 'x-dh-build-for-type') {
+				$cross_type = $value;
+				if ($cross_type ne 'host' and $cross_type ne 'target') {
+					error("Unknown value of X-DH-Build-For-Type \"$cross_type\" at debian/control:$.");
+				}
+			} elsif ($field_name eq 'build-profiles') {
+				# rely on libdpkg-perl providing the parsing functions
+				# because if we work on a package with a Build-Profiles
+				# field, then a high enough version of dpkg-dev is needed
+				# anyways
+				my $build_profiles = $value;
+				eval {
+					require Dpkg::BuildProfiles;
+					my @restrictions=Dpkg::BuildProfiles::parse_build_profiles($build_profiles);
+					if (@restrictions) {
+						$included_in_build_profile = Dpkg::BuildProfiles::evaluate_restriction_formula(
+							\@restrictions,
+							\@profiles);
+					}
+				};
+				if ($@) {
+					error("The control file has a Build-Profiles field. Requires libdpkg-perl >= 1.17.14");
+				}
+			}
+		}
 		if (!$_ or eof) { # end of stanza.
 			if ($package) {
 				$package_types{$package}=$package_type // 'deb';
@@ -1667,8 +1779,8 @@ sub getpackages {
 							$included = 1 if samearch($desired_arch, $arch);
 						}
 						if ($included) {
-							push(@{$packages_by_type{'arch'}}, $package);
-							push(@{$packages_by_type{'both'}}, $package);
+								push(@{$packages_by_type{'arch'}}, $package);
+								push(@{$packages_by_type{'both'}}, $package);
 						}
 					}
 				}
@@ -1678,6 +1790,7 @@ sub getpackages {
 			$cross_type = undef;
 			$arch='';
 			$section='';
+			%seen_fields = ();
 		}
 	}
 	close($fd);
@@ -2356,6 +2469,15 @@ sub is_so_or_exec_elf_file {
 	my $elf_type_unpacked = unpack($short_format, $elf_type);
 	return 0 if $elf_type_unpacked != ELF_TYPE_EXECUTABLE and $elf_type_unpacked != ELF_TYPE_SHARED_OBJECT;
 	return 1;
+}
+
+sub _has_shbang_line {
+	my ($file) = @_;
+	open(my $fd, '<', $file) or error("open $file: $!");
+	my $line = <$fd>;
+	close($fd);
+	return 1 if (defined($line) and substr($line, 0, 2) eq '#!');
+	return 0;
 }
 
 # Returns true iff the given argument is an empty directory.

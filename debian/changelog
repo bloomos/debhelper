@@ -1,3 +1,77 @@
+debhelper (11.3.5) unstable; urgency=medium
+
+  * Dh_Lib.pm: Introduce a new glob_expand error handler to
+    better emulate the old style glob code to fail when a
+    non-glob entry in the config file is missing.
+  * dh_installdocs: Use the new glob_expand error handler to
+    restore the behaviour to that of debhelper/10.5.1 and older.
+    Thanks to Christoph Berg for reporting the issue.
+    (Closes: #902355)
+  * dh_installexamples: Ditto.
+  * dh_installinfo: Ditto.
+  * dh_installman: Ditto.
+  * Dh_Lib.pm: Fix a bug where ending debian/control on (what
+    debhelper believed was) a comment line could cause debhelper
+    to omit the last package listed in the file.  Thanks to
+    Santiago Vila for reporting the bug. (Closes: #902748)
+
+ -- Niels Thykier <niels@thykier.net>  Sat, 30 Jun 2018 11:52:51 +0000
+
+debhelper (11.3.4) unstable; urgency=medium
+
+  * Dh_Lib.pm: Fix bug that made the parser assign the wrong
+    value from the Build-Profiles field.  Thanks to Sven Joachim
+    for reporting the bug.  (Closes: #902268)
+  * debhelper.pod: Rewrite the compat 11 change on "main doc
+    packages" in an attempt to clarify what is happening in
+    compat 11.  Thanks to Paul Gevers for pointing out some of
+    the confusing aspects.
+
+ -- Niels Thykier <niels@thykier.net>  Sun, 24 Jun 2018 09:46:35 +0000
+
+debhelper (11.3.3) unstable; urgency=medium
+
+  [ Niels Thykier ]
+  * d/control: Remove versioned Breaks on qt5-qmake as it
+    prevents others from backporting qt5 packages to
+    stable-backports.  The Breaks was added to assist
+    cross-building in buster and it has already served that
+    purpose by now.
+  * Dh_Lib.pm: Provide a more helpful diagnostic message when
+    an executable config file fails and it does not have a
+    #!-line (and is not an ELF binary).  Thanks to Nadav
+    Ruskin for the suggestion.  (Closes: #902214)
+  * debhelper.pod: Make a dedicated subsection about executable
+    debhelper config files to make them more prominent.  Thanks
+    to Nadav Ruskin for the suggestion.  (Closes: #901715)
+  * Dh_Lib.pm: Avoid forking a shell when running executable
+    debhelper config files.
+  * Dh_Lib.pm: Validate package names according the rules for
+    Debian packages.  Thanks to Raphael Geissert and Tim
+    Düsterhus for the suggestion.  (Closes: #567178)
+  * Dh_Lib.pm: Rewrite deb822 parser to validate d/control
+    more strictly.  Particularly, debhelper no longer permits
+    the same field twice in a stanza.  Thanks to Tim Düsterhus
+    for the suggestion.
+  * Dh_Lib.pm: Ensure that at most once definition of
+    (X-)Package-Type is used per stanza.
+
+  [ Roberto C. Sánchez ]
+  * cmake.pm: Reorder arguments to cmake to make "-D FOO=BAR"
+    work.  This form only works if it is before the directory
+    passed to cmake.
+
+  [ Daniele Nicolodi ]
+  * dh_installsystemd: Improve man page.
+  * dh_installsystemd: Tighten error handling: fail immediately if an unit
+    name not installed by the package is specified on the command line.
+  * dh_installsystemd: Fix the undocumented '--no-also' command line
+    option to do not affect handling of the Alias= directives.
+  * dh_installsystemd: Add timer units to the list of units considered
+    when the '--name' option is specified.
+
+ -- Niels Thykier <niels@thykier.net>  Sat, 23 Jun 2018 18:30:08 +0000
+
 debhelper (11.3.2~bpo9+2) stretch-backports; urgency=medium
 
   * Remove Breaks against qt5-qmake (neither needed nor satisfiable in
