@@ -1,3 +1,9 @@
+debhelper (11.3.5~bpo9+1) stretch-backports; urgency=medium
+
+  * Rebuild for stretch-backports.
+
+ -- Niels Thykier <niels@thykier.net>  Sun, 22 Jul 2018 18:28:12 +0000
+
 debhelper (11.3.5) unstable; urgency=medium
 
   * Dh_Lib.pm: Introduce a new glob_expand error handler to
