@@ -57,7 +57,7 @@ option.
       debian/I<package>.timer,
       debian/I<package>@.timer
 
-If any of those fiels exists, they are installed into
+If any of those files exists, they are installed into
 F<lib/systemd/system/> in the package build directory.
 
 =item debian/I<package>.tmpfile
@@ -82,12 +82,19 @@ should not be started.
 
 =item B<--name=>I<name>
 
-Install the service file as I<name.service> instead of the default
-filename I<package.service>. When this parameter is used,
-B<dh_installsystemd> looks for and installs files named
-F<debian/package.name.service> instead of the usual
-F<debian/package.service>.  Moreover, maintainer scripts are only
-generated for units that match the given I<name>.
+This option controls several things.
+
+It changes the name that B<dh_installsystemd> uses when it looks for
+maintainer provided systemd unit files as listed in the L</FILES>
+section.  As an example, B<dh_installsystemd --name foo> will look for
+F<<< I<debian/package.>B<< I<foo> >>I<.service> >>> instead of
+F<< I<debian/package.service> >>).  These unit files are installed as F<<
+I<name.unit-extension> >> (in the example, it would be installed as
+F<<< B<< I<foo> >>I<.service> >>>).
+
+Furthermore, if no unit files are passed explicitly as command line
+arguments, B<dh_installsystemd> will only act on unit files called
+I<name> (rather than all unit files found in the package).
 
 =item B<--restart-after-upgrade>
 
@@ -121,6 +128,15 @@ latter is only relevant for services without a corresponding init script).
 B<Note> that this option does not affect whether the services are
 enabled.  Please remember to also use B<--no-enable> if the services
 should not be enabled.
+
+=item S<B<unit file> ...>
+
+Only process and generate maintscripts for the installed unit files
+with the (base)name I<unit file>.
+
+Note: B<dh_installsystemd> will still install unit files from
+F<debian/> but it will not generate any maintscripts for them unless
+they are explicitly listed in S<B<unit file> ...>
 
 =back
 
@@ -238,7 +254,7 @@ sub list_installed_units {
 }
 
 
-# PROMISE: DH NOOP WITHOUT tmp(lib/systemd/system) tmp(usr/lib/tmpfiles.d) tmp(etc/tmpfiles.d) mount path service socket target tmpfile timer
+# PROMISE: DH NOOP WITHOUT tmp(lib/systemd/system) tmp(usr/lib/tmpfiles.d) tmp(etc/tmpfiles.d) mount path service socket target tmpfile timer cli-options()
 
 
 # Install package maintainer supplied unit files
@@ -347,7 +363,10 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 		# Extract unit aliases.
 		push @{$aliases{$unit}}, $_ for extract_key($path, 'Alias');
 
-		if (! grep { has_sysv_equivalent($tmpdir, $_) } ($unit, @{$aliases{$unit}})) {
+		# In compat 11 (and earlier), dh_installinit will handle services with
+		# a sysv-equivalent service.  In compat 12, dh_installsystemd will
+		# take care of it.
+		if (not compat(11) or not grep { has_sysv_equivalent($tmpdir, $_) } ($unit, @{$aliases{$unit}})) {
 			push @start_units, $unit;
 		}
 
@@ -370,25 +389,34 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 	}
 
 	if (@start_units) {
-		my $units = { 'UNITFILES' => join(' ', @start_units) };
+		my $replace = { 'UNITFILES' => join(' ', @start_units) };
 
 		if ($dh{RESTART_AFTER_UPGRADE}) {
-			my $snippet = $dh{NO_START} ? 'postinst-systemd-restartnostart' : 'postinst-systemd-restart';
-			autoscript($package, 'postinst', $snippet, $units, \%options);
+			my $snippet;
+			if ($dh{NO_START}) {
+				$snippet = 'postinst-systemd-restartnostart';
+				$replace->{RESTART_ACTION} = 'try-restart';
+			} else {
+				$snippet = 'postinst-systemd-restart';
+				$replace->{RESTART_ACTION} = 'restart';
+			}
+			autoscript($package, 'postinst', $snippet, $replace, \%options);
 		} elsif (!$dh{NO_START}) {
 			# (stop|start) service (before|after) upgrade
-			autoscript($package, 'postinst', 'postinst-systemd-start', $units, \%options);
+			autoscript($package, 'postinst', 'postinst-systemd-start', $replace, \%options);
 		}
-
-		autoscript($package, 'postrm', 'postrm-systemd-reload-only', $units, \%options);
 
 		if ($dh{R_FLAG} || $dh{RESTART_AFTER_UPGRADE}) {
 			# stop service only on remove
-			autoscript($package, 'prerm', 'prerm-systemd-restart', $units, \%options);
+			autoscript($package, 'prerm', 'prerm-systemd-restart', $replace, \%options);
 		} elsif (!$dh{NO_START}) {
 			# always stop service
-			autoscript($package, 'prerm', 'prerm-systemd', $units, \%options);
+			autoscript($package, 'prerm', 'prerm-systemd', $replace, \%options);
 		}
+
+		# Run this with "default" order so it is always after other
+		# service related autosnippets.
+		autoscript($package, 'postrm', 'postrm-systemd-reload-only', $replace);
 	}
 }
 

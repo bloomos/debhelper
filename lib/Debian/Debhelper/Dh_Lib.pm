@@ -15,8 +15,11 @@ use constant {
 	# Lowest compat level that does *not* cause deprecation
 	# warnings
 	'LOWEST_NON_DEPRECATED_COMPAT_LEVEL' => 9,
+	# Lowest compat level to generate "debhelper-compat (= X)"
+	# relations for.
+	'LOWEST_VIRTUAL_DEBHELPER_COMPAT_LEVEL' => 9,
 	# Highest compat level permitted
-	'MAX_COMPAT_LEVEL' => 12,
+	'MAX_COMPAT_LEVEL' => 13,
 	# Magic value for xargs
 	'XARGS_INSERT_PARAMS_HERE' => \'<INSERT-HERE>', #'# Hi emacs.
 	# Magic value for debhelper tools to request "current version"
@@ -255,7 +258,7 @@ sub init {
 	# make sure verbose is on. Otherwise, check DH_QUIET.
 	if (defined $ENV{DH_VERBOSE} && $ENV{DH_VERBOSE} ne "") {
 		$dh{VERBOSE}=1;
-	} elsif (defined $ENV{DH_QUIET} && $ENV{DH_QUIET} ne "") {
+	} elsif (defined $ENV{DH_QUIET} && $ENV{DH_QUIET} ne "" || get_buildoption("terse")) {
 		$dh{QUIET}=1;
 	}
 
@@ -453,6 +456,7 @@ sub _doit {
 					chdir($dir) or error("chdir(\"${dir}\) failed: $!");
 				}
 			}
+			open(STDIN, '<', '/dev/null') or error("redirect STDIN failed: $!");
 			if (defined(my $output = $options->{stdout})) {
 				open(STDOUT, '>', $output) or error("redirect STDOUT failed: $!");
 			}
@@ -1001,22 +1005,33 @@ sub pkgfilename {
 # As a side effect, sets $dh{VERSION} to the version of this package.
 {
 	# Caches return code so it only needs to run dpkg-parsechangelog once.
-	my %isnative_cache;
+	my (%isnative_cache, %pkg_version);
 	
 	sub isnative {
-		my $package=shift;
+		my ($package) = @_;
+		my $cache_key = $package;
 
-		return $isnative_cache{$package} if defined $isnative_cache{$package};
+		if (exists($isnative_cache{$cache_key})) {
+			$dh{VERSION} = $pkg_version{$cache_key};
+			return $isnative_cache{$cache_key};
+		}
+
+		# Make sure we look at the correct changelog.
+		my $isnative_changelog = pkgfile($package,"changelog");
+		if (! $isnative_changelog) {
+			$isnative_changelog = "debian/changelog";
+			$cache_key = '_source';
+			# check if we looked up the default changelog
+			if (exists($isnative_cache{$cache_key})) {
+				$dh{VERSION} = $pkg_version{$cache_key};
+				return $isnative_cache{$cache_key};
+			}
+		}
 
 		if (not %isnative_cache) {
 			require Dpkg::Changelog::Parse;
 		}
 
-		# Make sure we look at the correct changelog.
-		my $isnative_changelog=pkgfile($package,"changelog");
-		if (! $isnative_changelog) {
-			$isnative_changelog="debian/changelog";
-		}
 		my $res = Dpkg::Changelog::Parse::changelog_parse(
 			file => $isnative_changelog,
 			compression => 0,
@@ -1029,15 +1044,15 @@ sub pkgfilename {
 		if (not defined($version) or not $version->is_valid) {
 			error("changelog parse failure; invalid or missing version");
 		}
-		# Get the package version.
-		$dh{VERSION} = $version->as_string;
+		# Get and cache the package version.
+		$dh{VERSION} = $pkg_version{$cache_key} = $version->as_string;
 
 		# Is this a native Debian package?
 		if (index($dh{VERSION}, '-') > -1) {
-			return $isnative_cache{$package}=0;
+			return $isnative_cache{$cache_key} = 0;
 		}
 		else {
-			return $isnative_cache{$package}=1;
+			return $isnative_cache{$cache_key} = 1;
 		}
 	}
 }
@@ -1524,13 +1539,14 @@ sub is_cross_compiling {
 # As a side effect, populates %package_arches and %package_types
 # with the types of all packages (not only those returned).
 my (%package_types, %package_arches, %package_multiarches, %packages_by_type,
-    %package_sections, $sourcepackage, %package_cross_type);
+    %package_sections, $sourcepackage, %package_cross_type, %dh_bd_sequences);
 
 # Resets the arrays; used mostly for testing
 sub resetpackages {
 	undef $sourcepackage;
 	%package_types = %package_arches = %package_multiarches =
 	    %packages_by_type = %package_sections = %package_cross_type = ();
+	%dh_bd_sequences = ();
 }
 
 # Returns source package name
@@ -1655,6 +1671,16 @@ sub getpackages {
 					warning(" * If this is not possible, then please remove the debhelper-compat relation and insert the");
 					warning("   compat level into the file debian/compat.  (E.g. \"echo ${clevel} > debian/compat\")");
 					error("Could not parse desired debhelper compat level from relation: $dep");
+				}
+				# Build-Depends on dh-sequence-<foo> OR dh-sequence-<foo> (<op> <version>)
+				if ($dep =~ m/^dh-sequence-(${PKGNAME_REGEX})\s*(?:[(]\s*(?:[<>]?=|<<|>>)\s*(${PKGVERSION_REGEX})\s*[)])?$/) {
+					my $sequence = $1;
+					if ($field ne 'build-depends') {
+						warning("Ignoring dh sequence add-on request for sequenece ${sequence} via ${field}: Please move it to the Build-Depends field");
+						warning("The relation that triggered this warning was: ${dep} (from the ${field} field)");
+						next;
+					}
+					$dh_bd_sequences{$sequence} = 1;
 				}
 			}
 		}
@@ -1940,6 +1966,14 @@ sub is_udeb {
 		}
 		return $packages_to_process{$package} // 0;
 	}
+}
+
+# Only useful for dh(1)
+sub bd_dh_sequences {
+	# Use $sourcepackage as check because %dh_bd_sequence can be empty
+	# after running getpackages().
+	getpackages() if not defined($sourcepackage);
+	return sort(keys(%dh_bd_sequences));
 }
 
 sub _concat_slurp_script_files {

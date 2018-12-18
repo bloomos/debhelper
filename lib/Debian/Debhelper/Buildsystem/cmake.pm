@@ -8,12 +8,11 @@ package Debian::Debhelper::Buildsystem::cmake;
 
 use strict;
 use warnings;
-use Debian::Debhelper::Dh_Lib qw(compat dpkg_architecture_value error is_cross_compiling);
+use Debian::Debhelper::Dh_Lib qw(%dh compat dpkg_architecture_value error is_cross_compiling);
 use parent qw(Debian::Debhelper::Buildsystem);
 
 my @STANDARD_CMAKE_FLAGS = qw(
   -DCMAKE_INSTALL_PREFIX=/usr
-  -DCMAKE_VERBOSE_MAKEFILE=ON
   -DCMAKE_BUILD_TYPE=None
   -DCMAKE_INSTALL_SYSCONFDIR=/etc
   -DCMAKE_INSTALL_LOCALSTATEDIR=/var
@@ -25,6 +24,10 @@ my %DEB_HOST2CMAKE_SYSTEM = (
 	'linux'    => 'Linux',
 	'kfreebsd' => 'kFreeBSD',
 	'hurd'     => 'GNU',
+);
+
+my %GNU_CPU2SYSTEM_PROCESSOR = (
+	'powerpc64le' => 'ppc64le',
 );
 
 my %TARGET_BUILD_SYSTEM2CMAKE_GENERATOR = (
@@ -85,6 +88,9 @@ sub configure {
 		my $generator = $TARGET_BUILD_SYSTEM2CMAKE_GENERATOR{$backend};
 		push(@flags, "-G${generator}");
 	}
+	unless ($dh{QUIET}) {
+		push(@flags, "-DCMAKE_VERBOSE_MAKEFILE=ON");
+	}
 
 	if ($ENV{CC}) {
 		push @flags, "-DCMAKE_C_COMPILER=" . $ENV{CC};
@@ -99,7 +105,12 @@ sub configure {
 		} else {
 			error("Cannot cross-compile - CMAKE_SYSTEM_NAME not known for ${deb_host}");
 		}
-		push @flags, "-DCMAKE_SYSTEM_PROCESSOR=" . dpkg_architecture_value("DEB_HOST_GNU_CPU");
+		my $gnu_cpu = dpkg_architecture_value("DEB_HOST_GNU_CPU");
+		if (exists($GNU_CPU2SYSTEM_PROCESSOR{$gnu_cpu})) {
+			push @flags, "-DCMAKE_SYSTEM_PROCESSOR=" . $GNU_CPU2SYSTEM_PROCESSOR{$gnu_cpu};
+		} else {
+			push @flags, "-DCMAKE_SYSTEM_PROCESSOR=${gnu_cpu}";
+		}
 		if (not $ENV{CC}) {
 			push @flags, "-DCMAKE_C_COMPILER=" . dpkg_architecture_value("DEB_HOST_GNU_TYPE") . "-gcc";
 		}
@@ -108,8 +119,9 @@ sub configure {
 		}
 		push(@flags, "-DPKG_CONFIG_EXECUTABLE=/usr/bin/" . dpkg_architecture_value("DEB_HOST_GNU_TYPE") . "-pkg-config");
 		push(@flags, "-DPKGCONFIG_EXECUTABLE=/usr/bin/" . dpkg_architecture_value("DEB_HOST_GNU_TYPE") . "-pkg-config");
-		push(@flags, "-DCMAKE_INSTALL_LIBDIR=lib/" . dpkg_architecture_value("DEB_HOST_MULTIARCH"));
+		push(@flags, "-DQMAKE_EXECUTABLE=/usr/bin/" . dpkg_architecture_value("DEB_HOST_GNU_TYPE") . "-qmake");
 	}
+	push(@flags, "-DCMAKE_INSTALL_LIBDIR=lib/" . dpkg_architecture_value("DEB_HOST_MULTIARCH"));
 
 	# CMake doesn't respect CPPFLAGS, see #653916.
 	if ($ENV{CPPFLAGS} && ! compat(8)) {
