@@ -1,3 +1,9 @@
+debhelper (12~bpo9+1) stretch-backports; urgency=medium
+
+  * Rebuild for stretch-backports.
+
+ -- Niels Thykier <niels@thykier.net>  Thu, 03 Jan 2019 20:59:01 +0000
+
 debhelper (12) unstable; urgency=medium
 
   [ Niels Thykier ]
