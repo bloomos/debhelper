@@ -1,3 +1,16 @@
+debhelper (12) unstable; urgency=medium
+
+  [ Niels Thykier ]
+  * Release debhelper/12 marking compat 12 as stable.
+  * dh: Special NOOP PROMISE of cli-options() to always allow skipping
+    the helper (as we know no option can make it change behaviour).
+
+  [ Dmitry Shachnev ]
+  * dh_compress: Do not compress mkdocs search indices
+    (search_index.json).
+
+ -- Niels Thykier <niels@thykier.net>  Mon, 24 Dec 2018 13:47:55 +0000
+
 debhelper (11.5.4~bpo9+1) stretch-backports; urgency=medium
 
   * Rebuild for stretch-backports.
