@@ -10,6 +10,7 @@ use warnings;
 
 use Debian::Debhelper::Dh_Lib;
 use Getopt::Long;
+use List::Util qw(any);
 
 my (%exclude_package, %profile_enabled_packages, $profile_excluded_pkg);
 
@@ -214,7 +215,7 @@ sub parseopts {
 		# packages DH_INTERNAL_OPTIONS specifies to be acted on.
 		if (defined $dh{DOPACKAGES}) {
 			foreach my $package (getpackages()) {
-				if (! grep { $_ eq $package } @{$dh{DOPACKAGES}}) {
+				if (not any { $_ eq $package } @{$dh{DOPACKAGES}}) {
 					$exclude_package{$package}=1;
 				}
 			}
@@ -278,7 +279,7 @@ sub parseopts {
 	my %packages_seen;
 	foreach $package (@{$dh{DOPACKAGES}}) {
 		if (defined($dh{EXCLUDE_LOGGED}) &&
-		    grep { $_ eq basename($0) } load_log($package)) {
+		    any { $_ eq basename($0) } load_log($package)) {
 			$exclude_package{$package}=1;
 		}
 		if (! $exclude_package{$package}) {

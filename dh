@@ -11,6 +11,7 @@ use warnings;
 use constant {
 	'UNSKIPPABLE_CLI_OPTIONS_BUILD_SYSTEM' => q(-S|--buildsystem|-D|--sourcedirectory|-B|--builddirectory),
 };
+use List::Util qw(any);
 use Debian::Debhelper::Dh_Lib;
 use Debian::Debhelper::SequencerUtil;
 
@@ -951,7 +952,7 @@ sub run_override {
 		# Ensure appropriate -a or -i option is passed when running
 		# an arch-specific override target.
 		my $opt=$override_type eq "arch" ? "-a" : "-i";
-		push @options, $opt unless grep { $_ eq $opt } @options;
+		push(@options, $opt) unless any { $_ eq $opt } @options;
 	}
 
 	# Discard any override log files before calling the override

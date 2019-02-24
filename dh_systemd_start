@@ -11,6 +11,7 @@ use warnings;
 use Debian::Debhelper::Dh_Lib;
 use File::Find;
 use Cwd qw(getcwd abs_path);
+use List::Util qw(any);
 
 our $VERSION = DH_BUILTIN_VERSION;
 
@@ -219,7 +220,7 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 				$base =~ s/\.(?:mount|service|socket|target|path)$//g;
 				-f "$tmpdir/etc/init.d/$base"
 			} ($base, @{$aliases{$name}});
-		if (@sysv == 0 && !grep { $_ eq $name } @units) {
+		if (@sysv == 0 && !any { $_ eq $name } @units) {
 			push @units, $name;
 		}
 	}

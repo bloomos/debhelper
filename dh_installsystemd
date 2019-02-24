@@ -11,6 +11,7 @@ use warnings;
 use Debian::Debhelper::Dh_Lib;
 use File::Find;
 use Cwd qw(getcwd abs_path);
+use List::Util qw(any);
 
 our $VERSION = DH_BUILTIN_VERSION;
 
@@ -366,7 +367,7 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 		# In compat 11 (and earlier), dh_installinit will handle services with
 		# a sysv-equivalent service.  In compat 12, dh_installsystemd will
 		# take care of it.
-		if (not compat(11) or not grep { has_sysv_equivalent($tmpdir, $_) } ($unit, @{$aliases{$unit}})) {
+		if (not compat(11) or not any { has_sysv_equivalent($tmpdir, $_) } ($unit, @{$aliases{$unit}})) {
 			push @start_units, $unit;
 		}
 

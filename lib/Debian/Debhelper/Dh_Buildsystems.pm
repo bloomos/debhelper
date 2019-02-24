@@ -11,6 +11,7 @@ use warnings;
 use Debian::Debhelper::Buildsystem;
 use Debian::Debhelper::Dh_Lib;
 use File::Spec;
+use List::Util qw(any);
 
 use Exporter qw(import);
 our @EXPORT=qw(&buildsystems_init &buildsystems_do &load_buildsystem &load_all_buildsystems);
@@ -259,7 +260,7 @@ sub buildsystems_do {
 		$step =~ s/^dh_auto_//;
 	}
 
-	if (grep(/^\Q$step\E$/, BUILD_STEPS) == 0) {
+	if (not any { $_ eq $step } BUILD_STEPS) {
 		error("unrecognized build step: " . $step);
 	}
 

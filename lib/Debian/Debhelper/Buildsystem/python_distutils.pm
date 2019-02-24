@@ -12,6 +12,7 @@ use warnings;
 use Cwd ();
 use Debian::Debhelper::Dh_Lib qw(error deprecated_functionality);
 use parent qw(Debian::Debhelper::Buildsystem);
+use List::Util qw(any);
 
 sub DESCRIPTION {
 	"Python Distutils (setup.py) [DEPRECATED]"
@@ -63,7 +64,7 @@ sub pre_building_step {
 	deprecated_functionality('Please use the third-party "pybuild" build system instead of python-distutils',
 		12);
 
-	return unless grep /$step/, qw(build install clean);
+	return unless any { $_ eq $step } qw(build install clean);
 
 	if ($this->get_buildpath() ne $this->DEFAULT_BUILD_DIRECTORY()) {
 		# --build-base can only be passed to the build command. However,
@@ -139,7 +140,7 @@ sub setup_py {
 	if ($ecode != 0) {
 		error("pyversions -r failed [$ecode]")
 	}
-	if (grep /^\Q$python_default\E/, @python_requested) {
+	if (any { /^\Q$python_default\E/ } @python_requested) {
 		@python_requested = (
 			grep(!/^\Q$python_default\E/, @python_requested),
 			"python",
@@ -149,11 +150,11 @@ sub setup_py {
 	my @python_dbg;
 	my @dbg_build_needed = $this->dbg_build_needed();
 	foreach my $python (map { $_."-dbg" } @python_requested) {
-		if (grep /^(python-all-dbg|\Q$python\E)/, @dbg_build_needed) {
+		if (any { /^(python-all-dbg|\Q$python\E)/ } @dbg_build_needed) {
 			push @python_dbg, $python;
 		}
 		elsif (($python eq "python-dbg")
-		       and (grep /^\Q$python_default\E/, @dbg_build_needed)) {
+		       and (any { /^\Q$python_default\E/ } @dbg_build_needed)) {
 			push @python_dbg, $python_default."-dbg";
 		}
 	}

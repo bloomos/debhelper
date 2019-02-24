@@ -38,6 +38,8 @@ use constant {
 use Errno qw(ENOENT EXDEV);
 use Exporter qw(import);
 use File::Glob qw(bsd_glob GLOB_CSH GLOB_NOMAGIC GLOB_TILDE);
+use List::Util qw(any);
+
 our (@EXPORT, %dh);
 @EXPORT = (
 	# debhelper basis functionality
@@ -232,7 +234,7 @@ sub init {
 	# Getopt::Long, which I'd prefer to avoid loading at all if possible.
 	if ((defined $ENV{DH_OPTIONS} && length $ENV{DH_OPTIONS}) ||
  	    (defined $ENV{DH_INTERNAL_OPTIONS} && length $ENV{DH_INTERNAL_OPTIONS}) ||
-	    grep /^-/, @ARGV) {
+	    any { /^-/ } @ARGV) {
 		eval { require Debian::Debhelper::Dh_Getopt; };
 		error($@) if $@;
 		Debian::Debhelper::Dh_Getopt::parseopts(%params);
@@ -911,14 +913,9 @@ sub default_sourcedir {
 		my (@try, $check_expensive);
 
 		if (not exists($_check_expensive{$filename})) {
-			my @f = grep {
+			$check_expensive = any {
 				!/\.debhelper$/
 			} bsd_glob("debian/*.$filename.*", GLOB_CSH & ~(GLOB_NOMAGIC|GLOB_TILDE));
-			if (not @f) {
-				$check_expensive = 0;
-			} else {
-				$check_expensive = 1;
-			}
 			$_check_expensive{$filename} = $check_expensive;
 		} else {
 			$check_expensive = $_check_expensive{$filename};
