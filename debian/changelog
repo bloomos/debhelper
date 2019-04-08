@@ -1,3 +1,9 @@
+debhelper (12.1.1~bpo9+1) stretch-backports; urgency=medium
+
+  * Rebuild for stretch-backports.
+
+ -- Mattia Rizzolo <mattia@debian.org>  Mon, 08 Apr 2019 16:03:24 +0200
+
 debhelper (12.1.1) unstable; urgency=medium
 
   * dh_installinitramfs: Install hooks as executable rather than
