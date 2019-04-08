@@ -1,3 +1,44 @@
+debhelper (12.1.1) unstable; urgency=medium
+
+  * dh_installinitramfs: Install hooks as executable rather than
+    plan files.  Thanks to Thorsten Glaser for the report.
+    (Closes: #922990)
+  * dh_compress: Fix bug where examples where compressed when a
+    doc package shipped examples for another package.  Thanks to
+    Christian Kastner for reporting this.  (Closes: #922267)
+
+ -- Niels Thykier <niels@thykier.net>  Sat, 23 Feb 2019 13:24:47 +0000
+
+debhelper (12.1) unstable; urgency=medium
+
+  [ Xavier Guimard ]
+  * dh_fixperms: add .node in mode_0644_patterns.
+
+  [ Sylvestre Ledru ]
+  * dh_strip: Print a warning when an ELF binary does not have a
+    build-id (or when dh_strip cannot find it).
+
+  [ Niels Thykier ]
+  * Dh_Lib.pm: Strip leading and trailing whitespace from lines in
+    regular debhelper config files.  Whitespace-only lines from
+    executable config files are now explicitly detected and triggers
+    a human readable error message early rather than warnings/errors
+    about uninitialized variables.   Thanks to Ben Finney for the
+    suggestion and the initial patch.  (Closes: #919853)
+  * meson.pm: Dump "meson-logs/testlog.txt" if testing fails with
+    an error.  Thanks to Jeremy Bicha for the suggestion.
+    (Closes: #918066)
+  * dh_missing: Clarify the documentation about when -X with other
+    helpers can may dh_missing ignore paths that are not installed.
+    Thanks to Hilko Bengen for reporting the original documentation
+    was unsufficient.  (Closes: #917362)
+  * d/control: Bump Standards-Version to 4.3.0 - no changes required.
+
+  [ Baptiste Jammet ]
+  * fr.po: Update French translation.  (Closes: #921254)
+
+ -- Niels Thykier <niels@thykier.net>  Sun, 10 Feb 2019 20:33:53 +0000
+
 debhelper (12~bpo9+1) stretch-backports; urgency=medium
 
   * Rebuild for stretch-backports.
