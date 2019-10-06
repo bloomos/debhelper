@@ -1,3 +1,9 @@
+debhelper (12.6.1~bpo10+1) buster-backports; urgency=medium
+
+  * Rebuild for buster-backports.
+
+ -- Niels Thykier <niels@thykier.net>  Sun, 06 Oct 2019 12:25:31 +0000
+
 debhelper (12.6.1) unstable; urgency=medium
 
   * Upload to unstable now that libdebhelper-perl has been through
