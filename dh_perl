@@ -73,6 +73,11 @@ init();
 
 my $vendorlib = substr $Config{vendorlib}, 1;
 my $vendorarch = substr $Config{vendorarch}, 1;
+if (is_cross_compiling()) {
+	my $incdir = perl_cross_incdir();
+	$vendorarch = substr qx/perl -I$incdir -MConfig -e 'print \$Config{vendorarch}'/, 1
+		if defined $incdir;
+}
 
 # Cleaning the paths given on the command line
 foreach (@ARGV) {
@@ -89,6 +94,9 @@ use constant PROGRAM   => 1;
 use constant PM_MODULE => 2;
 use constant XS_MODULE => 4;
 use constant ARCHDEP_MODULE => 8;
+
+use constant MA_ANY_INCOMPATIBLE_TYPES => ~(PROGRAM | PM_MODULE);
+
 
 foreach my $package (@{$dh{DOPACKAGES}}) {
 	my $tmp=tmpdir($package);
@@ -139,7 +147,7 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 		}
 
 		my $perlarch = $perl;
-		$perlarch .= ':any' if $deps == PROGRAM and not $dh{V_FLAG_SET};
+		$perlarch .= ':any' if (($deps & MA_ANY_INCOMPATIBLE_TYPES) == 0) and not $dh{V_FLAG_SET};
 
 		# no need to depend on an un-versioned perl-base -- it's
 		# essential

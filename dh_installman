@@ -272,22 +272,46 @@ on_items_in_parallel(\@all_packages, sub {
 });
 
 # Now utf-8 conversion.
-if (defined(`man --version`)) {
+my $has_man_recode = 0;
+$has_man_recode = 1 if has_man_db_tool('man-recode');
+
+if ($has_man_recode || has_man_db_tool('man')) {
 	my (@manpages_to_reencode, @issues);
 	for my $package (@{$dh{DOPACKAGES}}) {
 		next if is_udeb($package);
 		my $tmp = tmpdir($package);
 		foreach my $dir (qw{usr/share/man}) {
 			next unless -e "$tmp/$dir";
-			find(sub {
-					return if -l $_ || !-f _;
-					if ($_ =~ m/\.dh-new$/) {
-						push(@issues, "${File::Find::dir}/${_}");
-						return;
-					}
-					push(@manpages_to_reencode, "${File::Find::dir}/${_}");
+			my %seen;
+			my $wanted = sub {
+				my $path = $File::Find::name;
+				return if -l $path || !-f _;
+				if ($path =~ m/\.dh-new$/) {
+					push(@issues, $path);
+					return;
+				}
+				my $uncompressed_name = $path;
+				$uncompressed_name =~ s/\.(?:gz|Z)$//;
+				if (exists($seen{$uncompressed_name})) {
+					my $msg = "Multiple definitions for manpage ${uncompressed_name} via different compressions.";
+					my @values = sort ($path, $seen{$uncompressed_name});
+					my $warn_msg = $msg . '  Picking ' . $values[0] . ' as the canonical definition.';
+					my $error_msg = $msg . '  Please ensure there is at most one definition.';
+					deprecated_functionality($warn_msg, 13, $error_msg);
+					$path = $values[0];
+					warn("Removing conflicting definition of ${uncompressed_name} (" . $values[1]
+						. ') to ensure deterministic behaviour.');
+					rm_files($values[1]);
+				}
+				$seen{$uncompressed_name} = $path;
+			};
+			find({
+					no_chdir => 1,
+					wanted => $wanted,
 				}, "$tmp/$dir");
+			push(@manpages_to_reencode, sort(values(%seen)));
 		}
+
 		if (@issues) {
 			warning("Removing temporary manpages from another dh_installman instance");
 			rm_files(@issues);
@@ -296,19 +320,7 @@ if (defined(`man --version`)) {
 		}
 	}
 	if (@manpages_to_reencode) {
-		on_items_in_parallel(\@manpages_to_reencode, sub {
-			for my $manpage (@_) {
-				my $manpage_tmp = "${manpage}.dh-new";
-				my $manpage_cmd = ($manpage =~ m{^/}) ? $manpage : "./${manpage}";
-				doit({ stdout => $manpage_tmp }, 'man', '-l', '--recode', 'UTF-8', $manpage_cmd);
-				# recode uncompresses compressed pages
-				my $orig = $manpage;
-				rm_files($orig) if $manpage =~ s/\.(gz|Z)$//;
-				rename_path($manpage_tmp, $manpage);
-			}
-			# Bulk reset permissions of all re-encoded files
-			xargs(\@_, 'chmod', '0644', '--');
-		});
+		on_items_in_parallel(\@manpages_to_reencode, \&reencode_manpages);
 	}
 } else {
 	# Should only occur during debhelper building itself (to avoid a B-D on man-db).
@@ -357,6 +369,40 @@ sub find_so_man {
 			push @sodests,$solink;
 		}
 	}
+}
+
+sub has_man_db_tool {
+	my ($tool) = @_;
+	open(my $old_stderr, '>&', *STDERR) or error("dup(STDERR, tmp_fd): $!");
+	# Ignore the error; it is intended as noise-reduction.  As long as we can restore
+	# the stderr later, the log will just be slightly more noisy than planned.
+	open(*STDERR, '>', '/dev/null') or warn("redirect stderr to /dev/null failed: $!");
+
+	my $res = defined(`$tool --version`);
+	open(*STDERR, '>&', $old_stderr) or error("dup(tmp_fd, STDERR): $!");
+	close($old_stderr);
+	return $res;
+}
+
+sub reencode_manpages {
+	my (@manpages) = @_;
+	if ($has_man_recode) {
+		xargs(\@manpages, 'man-recode', '--to-code', 'UTF-8', '--suffix', '.dh-new');
+	}
+	for my $manpage (@manpages) {
+		my $manpage_tmp = "${manpage}.dh-new";
+		$manpage_tmp =~ s/\.(?:gz|Z)\.dh-new$/.dh-new/;
+		if (not $has_man_recode) {
+			my $manpage_cmd = ($manpage =~ m{^/}) ? $manpage : "./${manpage}";
+			doit({ stdout => $manpage_tmp }, 'man', '-l', '--recode', 'UTF-8', $manpage_cmd);
+		}
+		# recode uncompresses compressed pages
+		my $orig = $manpage;
+		rm_files($orig) if $manpage =~ s/\.(gz|Z)$//;
+		rename_path($manpage_tmp, $manpage);
+	}
+	# Bulk reset permissions of all re-encoded files
+	xargs(\@manpages, 'chmod', '0644', '--');
 }
 
 =head1 SEE ALSO

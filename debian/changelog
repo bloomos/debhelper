@@ -1,3 +1,107 @@
+debhelper (12.7.3) unstable; urgency=medium
+
+  [ Niels Thykier ]
+  * dh_perl: Use perl:any for perl module in addition to perl
+    programs.  Thanks to Helmut Grohne and Niko Tyni for the
+    suggestion and analysis.  (Closes: #946655)
+  * dh_gencontrol: Clear the "Built-Using" flag for dbgsym
+    packages.  It is irrelevant as the original binary will
+    have the field plus the field can cause lintian warnings.
+    (Closes: #947506)
+  * lintian-overrides: Override no-dh-sequencer as it is a
+    false-positive that lintian cannot be expected to know.
+
+  [ Debian Janitor ]
+  * Fix day-of-week for changelog entry 4.0.0.
+
+ -- Niels Thykier <niels@thykier.net>  Sun, 29 Dec 2019 17:59:47 +0000
+
+debhelper (12.7.2) unstable; urgency=medium
+
+  [ Niels Thykier ]
+  * dh: Skip conditional dh sequence addons in the clean target.
+    This avoids FTBFS with conditional addons where the
+    build-dependency is not satisfied.  (Closes: #944225)
+  * meson.pm: Fix bug where dh_auto_test would break horribly
+    under compat 13 due to an uninitialized variable.  Thanks to
+    Benjamin Jacobs for reporting the issue.  (Closes: #945149)
+  * dh_installman: Fix non-deterministic behaviour when there
+    multiple definitions of the same manpage in a package.
+    In compat 13, this is resolved by aborting with an error.
+    In older compat levels, dh_installman will deterministically
+    pick a canonical version (via sort) along with emitting a
+    warning.  Thanks to Colin Watson for reporting the issue.
+    (Closes: #943705)
+  * dh_auto_*: In compat 13+, reset HOME and XDG_* environment
+    variables.  Some are cleared and some are set to a writable
+    directory that persist until dh_clean.  Thanks to
+    Simon McVittie for reporting the issue.
+    (Closes: #942111)
+  * dh_auto_*:  As a side-effect of the above, debhelper in compat
+    13+ no longer trips a FTBFS in sbuild for meson packages when
+    ccache is installed but not configured/used explicitly.
+    Thanks to Simon McVittie for reporting the issue.
+    (Closes: #933799)
+  * d/control: Bump Standards-Versions to 4.4.1 - no changes
+    required.
+
+  [ Andrius Merkys ]
+  * debhelper.pod: Document changes to the gradle third-party
+    build system in compat 13.
+
+  [ Translations ]
+  * Update German translation (Chris Leick)  (Closes: #943853)
+
+
+ -- Niels Thykier <niels@thykier.net>  Sat, 07 Dec 2019 17:44:32 +0000
+
+debhelper (12.7.1) unstable; urgency=medium
+
+  [ Colin Watson ]
+  * dh_installman: Correctly handle compressed manpages when
+    dh_installman uses man-recode.  (Closes: #943376)
+
+ -- Niels Thykier <niels@thykier.net>  Sat, 26 Oct 2019 06:42:04 +0000
+
+debhelper (12.7) unstable; urgency=medium
+
+  [ Niels Thykier ]:
+  * dh_installman: Avoid error message when man-db is not installed
+    (only occurs in debhelper's own build as man-db is a mandatory
+    dependency).
+  * dh_installman: Use man-recode(1) when available to massively
+    speed up re-encoding performance for any package with a non-
+    trivial amount of manpages.  Thanks to Robert Luberda for
+    reporting the issue and Colin Watson for writing man-recode
+    (Closes: #933576)
+  * debhelper.pod: Actively discourage compat 11 as it has an
+    issue that causes services not to start correctly in all cases
+    (e.g. install, remove-but-not-purge, install again), which
+    cannot be fixed.
+  * dh_auto_*: Support a new --reload-all-buildenv-variables
+    option for resetting the cache (of e.g. dpkg-buildflags).
+    This is needed by e.g. parted which does two builds with
+    different CFLAGS.
+  * dh_makeshlibs: Suggest/Document that --no-add-udeb can be
+    relevant for some udebs where the shared library for the udeb
+    is embedded in a different package (e.g. the main udeb
+    package).  Thanks to Nicolas Braud-Santoni for reporting the
+    issue.  (Closes: #942454)
+  * meson.pm: Fix invalid call under compat 13.  Thanks to
+    Jeremy Bicha for testing it.  (Closes: #942690)
+
+  [ Helmut Grohne ]:
+  * cmake buildsystem: Fix CMAKE_SYSTEM_PROCESSOR for 32bit arms.
+    (Closes: #941245)
+
+  [ Niko Tyni ]
+  * Basic support cross building XS modules:
+    + perl_makemaker: run Makefile.PL with host arch Config.pm
+    + perl_build: run Build.PL and Build with host arch Config.pm
+    + dh_perl: scan host arch include directories for Perl plugins
+
+ -- Niels Thykier <niels@thykier.net>  Sun, 20 Oct 2019 17:48:06 +0000
+
 debhelper (12.6.1~bpo10+1) buster-backports; urgency=medium
 
   * Rebuild for buster-backports.
@@ -6874,7 +6978,7 @@ debhelper (4.0.0) unstable; urgency=low
     for woody should continue to use whatever compatibility level they are
     using.)
 
- -- Joey Hess <joeyh@debian.org>  Tue, 11 Apr 2002 17:28:57 -0400
+ -- Joey Hess <joeyh@debian.org>  Thu, 11 Apr 2002 17:28:57 -0400
 
 debhelper (3.4.14) unstable; urgency=low
 

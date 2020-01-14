@@ -66,7 +66,7 @@ declared via the build dependencies in F<debian/control>.  The
 relation can (since 12.5) be made optional via e.g.
 build-profiles.  This enables you to easily disable an addon that
 is only useful with certain profiles (e.g. to facilitate
-bootstraping).
+bootstrapping).
 
 Since debhelper 12.5, addons can also be activated in B<indep>-only
 mode (via B<Build-Depends-Indep>) or B<arch>-only mode (via
@@ -696,6 +696,9 @@ sub _compute_addons {
 	}
 	for my $addon_name (sort(keys(%addon_constraints))) {
 		my $addon_type = $addon_constraints{$addon_name};
+
+		# Special-case for the "clean" target to avoid B-D-I dependencies in that for conditional add-ons
+		next if $sequence_name eq 'clean' and $addon_type ne SEQUENCE_TYPE_BOTH;
 		if ($addon_type eq 'both' or $sequence_type eq 'both' or $addon_type eq $sequence_type) {
 			push(@addon_requests, "+${addon_name}");
 		}

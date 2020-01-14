@@ -146,6 +146,7 @@ qw(
 	is_cross_compiling
 	is_build_profile_active
 	get_buildoption
+	perl_cross_incdir
 ),
 	# Other
 qw(
@@ -2308,6 +2309,42 @@ sub get_source_date_epoch {
 	return $ENV{SOURCE_DATE_EPOCH} = $timestamp->epoch();
 }
 
+# Setup the build ENV by setting dpkg-buildflags (via set_buildflags()) plus
+# cleaning up HOME (etc) in compat 13+
+sub setup_buildenv {
+	set_buildflags();
+	if (not compat(12)) {
+		setup_home_and_xdg_dirs();
+	}
+}
+
+sub setup_home_and_xdg_dirs {
+	my $home_dir = generated_file('_source', 'home', 0);
+	my $xdg_rundir = generated_file('_source', 'xdg-runtime-dir', 0);
+	my $creating_rundir = -d $xdg_rundir ? 0 : 1;
+	my @paths = (
+		$home_dir,
+		$xdg_rundir,
+	);
+	my @clear_env = qw(
+		XDG_CACHE_HOME
+		XDG_CONFIG_DIRS
+		XDG_CONFIG_HOME
+		XDG_DATA_HOME
+		XDG_DATA_DIRS
+	);
+	install_dir(@paths);
+	if ($creating_rundir) {
+		chmod(0700, $xdg_rundir) == 1 or warning("chmod(0700, \"$xdg_rundir\") failed: $! (ignoring)");
+	}
+	for my $envname (@clear_env) {
+		delete($ENV{$envname});
+	}
+	$ENV{'HOME'} = $home_dir;
+	$ENV{'XDG_RUNTIME_DIR'} = $xdg_rundir;
+	return;
+}
+
 # Sets environment variables from dpkg-buildflags. Avoids changing
 # any existing environment variables.
 sub set_buildflags {
@@ -2708,6 +2745,18 @@ sub dbgsym_tmpdir {
 	return "debian/.debhelper/${package}/dbgsym-root";
 }
 
+sub perl_cross_incdir {
+	return if !is_cross_compiling();
+
+	# native builds don't currently need this so only load it on demand
+	require Config; Config->import();
+
+	my $triplet = dpkg_architecture_value("DEB_HOST_MULTIARCH");
+	my $perl_version = $Config::Config{version};
+	my $incdir = "/usr/lib/$triplet/perl/cross-config-${perl_version}";
+	return undef if !-e "$incdir/Config.pm";
+	return $incdir;
+}
 
 {
 	my %known_packages;
