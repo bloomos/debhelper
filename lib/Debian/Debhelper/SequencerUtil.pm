@@ -231,6 +231,10 @@ sub rules_explicit_target {
 		my $processing_targets = 0;
 		my $not_a_target = 0;
 		my $current_target;
+		if (! -f 'debian/rules') {
+			$RULES_PARSED = 1;
+			return;
+		}
 		open(MAKE, "LC_ALL=C make -Rrnpsf debian/rules ${\DUMMY_TARGET} 2>/dev/null |");
 		while (<MAKE>) {
 			if ($processing_targets) {

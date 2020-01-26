@@ -50,7 +50,8 @@ MAKEMANLIST=$(PERL) -e ' \
 			}; \
 		}'
 
-PERLLIBDIR=$(shell $(PERL) -MConfig -e 'print $$Config{vendorlib}')/Debian/Debhelper
+PERLLIBDIR=$(shell $(PERL) -MConfig -e 'print $$Config{vendorlib}')
+PERLLIBDIR_DH=$(PERLLIBDIR)/Debian/Debhelper
 
 PREFIX=/usr
 
@@ -120,17 +121,19 @@ endif
 install:
 	install -d $(DESTDIR)$(PREFIX)/bin \
 		$(DESTDIR)$(PREFIX)/share/debhelper/autoscripts \
-		$(DESTDIR)$(PERLLIBDIR)/Sequence \
-		$(DESTDIR)$(PERLLIBDIR)/Buildsystem \
-		$(DESTDIR)$(PERLLIBDIR)/DH
+		$(DESTDIR)$(PERLLIBDIR_DH)/Sequence \
+		$(DESTDIR)$(PERLLIBDIR_DH)/Buildsystem \
+		$(DESTDIR)$(PERLLIBDIR_DH)/DH \
+		$(DESTDIR)$(PERLLIBDIR)/Dpkg/BuildDriver
 	install dh $(COMMANDS) $(DESTDIR)$(PREFIX)/bin
 	install -m 0644 autoscripts/* $(DESTDIR)$(PREFIX)/share/debhelper/autoscripts
-	install -m 0644 lib/Debian/Debhelper/*.pm $(DESTDIR)$(PERLLIBDIR)
+	install -m 0644 lib/Debian/Debhelper/*.pm $(DESTDIR)$(PERLLIBDIR_DH)
 	[ "$(PREFIX)" = /usr ] || \
-		sed -i '/$$prefix=/s@/usr@$(PREFIX)@g' $(DESTDIR)$(PERLLIBDIR)/Dh_Lib.pm
-	install -m 0644 lib/Debian/Debhelper/Sequence/*.pm $(DESTDIR)$(PERLLIBDIR)/Sequence
-	install -m 0644 lib/Debian/Debhelper/Buildsystem/*.pm $(DESTDIR)$(PERLLIBDIR)/Buildsystem
-	install -m 0644 lib/Debian/Debhelper/DH/*.pm $(DESTDIR)$(PERLLIBDIR)/DH
+		sed -i '/$$prefix=/s@/usr@$(PREFIX)@g' $(DESTDIR)$(PERLLIBDIR_DH)/Dh_Lib.pm
+	install -m 0644 lib/Debian/Debhelper/Sequence/*.pm $(DESTDIR)$(PERLLIBDIR_DH)/Sequence
+	install -m 0644 lib/Debian/Debhelper/Buildsystem/*.pm $(DESTDIR)$(PERLLIBDIR_DH)/Buildsystem
+	install -m 0644 lib/Debian/Debhelper/DH/*.pm $(DESTDIR)$(PERLLIBDIR_DH)/DH
+	install -m 0644 lib/Dpkg/BuildDriver/*.pm $(DESTDIR)$(PERLLIBDIR)/Dpkg/BuildDriver
 
 test: version
 	MAKEFLAGS= HARNESS_OPTIONS=j$(TEST_JOBS) ./run perl -MTest::Harness -e 'runtests grep { ! /CVS/ && ! /\.svn/ && -f && -x && m/\.t$$/ } @ARGV' t/* t/*/*
