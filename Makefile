@@ -123,6 +123,7 @@ install:
 		$(DESTDIR)$(PREFIX)/share/debhelper/autoscripts \
 		$(DESTDIR)$(PERLLIBDIR_DH)/Sequence \
 		$(DESTDIR)$(PERLLIBDIR_DH)/Buildsystem \
+		$(DESTDIR)$(PERLLIBDIR_DH)/Commands \
 		$(DESTDIR)$(PERLLIBDIR_DH)/DH \
 		$(DESTDIR)$(PERLLIBDIR)/Dpkg/BuildDriver
 	install dh $(COMMANDS) $(DESTDIR)$(PREFIX)/bin
@@ -132,6 +133,7 @@ install:
 		sed -i '/$$prefix=/s@/usr@$(PREFIX)@g' $(DESTDIR)$(PERLLIBDIR_DH)/Dh_Lib.pm
 	install -m 0644 lib/Debian/Debhelper/Sequence/*.pm $(DESTDIR)$(PERLLIBDIR_DH)/Sequence
 	install -m 0644 lib/Debian/Debhelper/Buildsystem/*.pm $(DESTDIR)$(PERLLIBDIR_DH)/Buildsystem
+	install -m 0644 lib/Debian/Debhelper/Commands/*.pm $(DESTDIR)$(PERLLIBDIR_DH)/Commands
 	install -m 0644 lib/Debian/Debhelper/DH/*.pm $(DESTDIR)$(PERLLIBDIR_DH)/DH
 	install -m 0644 lib/Dpkg/BuildDriver/*.pm $(DESTDIR)$(PERLLIBDIR)/Dpkg/BuildDriver
 

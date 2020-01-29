@@ -28,6 +28,7 @@ use Debian::Debhelper::Dh_Lib qw(
 	get_buildoption
 	getpackages
 	load_log
+	on_pkgs_in_parallel
 	package_is_arch_all
     pkgfile
 	rm_files
@@ -640,9 +641,39 @@ sub parse_dh_cmd_options {
 	return;
 }
 
+sub _run_inlineable_command {
+	my ($command, @options) = @_;
+	if (@options) {
+		return if scalar(@options) > 1 || ($options[0] ne '-i' && $options[0] ne '-a');
+	}
+	my $perl_name = $command;
+	$command =~ tr/-/_/;
+	eval {
+		require "Debian/Debhelper/Commands/${command}.pm";
+	} or do {
+		warning("Could not load Debian/Debhelper/Commands/${command}.pm: $@") if $@ !~ m{Can't locate};
+		return;
+	};
+	my $entry_point_name = "Debian::Debhelper::Commands::${command}::process_packages_in_parallel";
+	my $entry_point;
+	{
+		no strict qw(refs);
+		$entry_point = \&{$entry_point_name};
+	}
+	# 3 space indent lines the command being run up under the
+	# sequence name after "dh ".
+	if (!$dh{QUIET}) {
+		print "   ".escape_shell($command, @options)."\n";
+	}
+
+	on_pkgs_in_parallel(\&$entry_point) if not $dh{NO_ACT};;
+	return 1;
+}
+
 
 sub run_through_command_sequence {
-	my ($full_sequence, $startpoint, $logged, $options, $all_packages, $arch_packages, $indep_packages) = @_;
+	my ($full_sequence, $startpoint, $logged, $options, $all_packages, $arch_packages, $indep_packages, $inline_cmds) =
+		@_;
 
 	my $command_opts = \%Debian::Debhelper::DH::SequenceState::command_opts;
 	my $stoppoint = $#{$full_sequence};
@@ -713,7 +744,9 @@ sub run_through_command_sequence {
 				push(@cmd_options, @{$command_opts->{$command}})
 					if exists($command_opts->{$command});
 				push(@cmd_options, @opts);
-				run_sequence_command_and_exit_on_failure($command, @cmd_options);
+				if (not $inline_cmds or not _run_inlineable_command($command, @cmd_options)) {
+					run_sequence_command_and_exit_on_failure($command, @cmd_options);
+				}
 			}
 		}
 

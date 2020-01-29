@@ -138,7 +138,7 @@ sub run_task {
 
 	run_through_command_sequence($full_sequence, \%startpoint, \%logged,
 		\@Debian::Debhelper::DH::SequenceState::options,
-		\@packages, \@arch_packages, \@indep_packages);
+		\@packages, \@arch_packages, \@indep_packages, 1);
 
 	return;
 }
