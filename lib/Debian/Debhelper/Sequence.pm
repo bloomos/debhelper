@@ -8,6 +8,7 @@ use warnings;
 
 use Exporter qw(import);
 
+use Debian::Debhelper::Dh_Lib qw(error);
 use Debian::Debhelper::SequencerUtil qw(extract_rules_target_name sequence_type	SEQUENCE_NO_SUBSEQUENCES
 	SEQUENCE_ARCH_INDEP_SUBSEQUENCES SEQUENCE_TYPE_ARCH_ONLY SEQUENCE_TYPE_INDEP_ONLY SEQUENCE_TYPE_BOTH
 	FLAG_OPT_SOURCE_BUILDS_NO_ARCH_PACKAGES	FLAG_OPT_SOURCE_BUILDS_NO_INDEP_PACKAGES);
@@ -91,11 +92,11 @@ sub add_command_at_end {
 
 sub rules_target_name {
 	my ($this, $sequence_type) = @_;
-	die("Internal error: Invalid sequence type $sequence_type") if $sequence_type eq SEQUENCE_NO_SUBSEQUENCES;
+	error("Internal error: Invalid sequence type $sequence_type") if $sequence_type eq SEQUENCE_NO_SUBSEQUENCES;
 	my $name = $this->{'_name'};
 	my $allowed_sequence_type = $this->{'_subsequences'};
 	if ($sequence_type ne SEQUENCE_TYPE_BOTH and $allowed_sequence_type eq SEQUENCE_NO_SUBSEQUENCES) {
-		die("Internal error: Requested subsequence ${sequence_type} of sequence ${name}, but it has no subsequences");
+		error("Internal error: Requested subsequence ${sequence_type} of sequence ${name}, but it has no subsequences");
 	}
 	if ($sequence_type ne SEQUENCE_TYPE_BOTH) {
 		return "${name}-${sequence_type}";
@@ -111,7 +112,7 @@ sub as_rules_target_command {
 
 sub flatten_sequence {
 	my ($this, $sequence_type, $flags) = @_;
-	die("Invalid sequence type $sequence_type") if $sequence_type eq SEQUENCE_NO_SUBSEQUENCES;
+	error("Invalid sequence type $sequence_type") if $sequence_type eq SEQUENCE_NO_SUBSEQUENCES;
 	my @cmds;
 	for my $cmd_desc (@{$this->{'_cmds'}}) {
 		my $seq_limitation = $cmd_desc->{'sequence-limitation'};

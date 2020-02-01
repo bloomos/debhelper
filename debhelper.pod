@@ -101,6 +101,76 @@ ignored.
 The syntax of these files is intentionally kept very simple to make them
 easy to read, understand, and modify.
 
+=head2 Substitutions in debhelper config files
+
+In compatibility level 13 and later, it is possible to use simple
+substitutions in I<some> debhelper config files (particularly,
+the configuration files for L<dh_install(1)>).
+
+All substitution variables are of the form I<${foo}> and the braces
+are mandatory.  Variable names are case-sensitive and consist of
+alphanumerics (a-zA-Z0-9), hyphens (-), underscores (_), and colons (:).
+The first character must be an alphanumeric.
+
+If you need a literal dollar sign that cannot trigger a substitution,
+you can either use the B<${Dollar}> substitution or the sequence B<${}>.
+
+The following expansions are available:
+
+=over 4
+
+=item B<DEB_HOST_*>, B<DEB_BUILD_*>, B<DEB_TARGET_*>
+
+Expands to the relevant L<dpkg-architecture(1)> value (similar to
+I<dpkg-architecture -qVARIABLE_HERE>).
+
+When in doubt, the B<DEB_HOST_*> variant is the one that will work both
+for native and cross builds.
+
+For performance reasons, debhelper will attempt to resolve these
+names from the environment first before consulting
+L<dpkg-architecture(1)>.  This is mostly mentioned for completeness
+as it will not matter for most cases.
+
+=item B<Dollar>
+
+Expands to a single literal B<$>-symbol.  This symbol will I<never>
+be considered part of a substitution variable.  That is:
+
+   # Triggers an error
+   ${NO_SUCH_TOKEN}
+   # Expands to the literal value "${NO_SUCH_TOKEN}"
+   ${Dollar}{NO_SUCH_TOKEN}
+
+This variable equivalent to the sequence B<${}> and the two can be
+used interchangeably.
+
+=item B<Newline>, B<Space>, B<Tab>
+
+Expands to a single ASCII newline, space and tab respectively.
+
+This can be useful if you need to include a literal whitespace
+character (e.g. space) where it would otherwise be stripped or
+used as a separator.
+
+=item B<< env:I<NAME> >>
+
+Expands to the environment variable I<NAME>.  The environment
+variable must be set (but can be set to the empty string).
+
+=back
+
+Note that all variables must expand to a defined value.  As an example,
+if debhelper sees I<${env:FOO}>, then it will insist that the environment
+variable I<FOO> is set (it can be set to the empty string).
+
+=head3 Substitution limits
+
+To avoid infinite loops and resource exhaustion, debhelper will stop
+with an error if the text contains many substitution variables (50) or
+they expand beyond a certain size (4096 characters or 3x length of
+the original input - whichever is bigger).
+
 =head2 Executable debhelper config files
 
 If you need additional flexibility, many of the debhelper tools
@@ -126,8 +196,14 @@ code should indicate success).
 
 =item *
 
-The output will be used exactly as it is.  Notably, debhelper will
-I<not> expand wildcards or strip comments in the output.
+In compatibility level 13+, the output will be subject to substitutions
+(see L</Substitutions in debhelper config files>) where the tool
+support these.  Remember to be careful if your generator I<also> provides
+substitutions as this can cause unnecessary confusion.
+
+Otherwise, the output will be used exactly as-is.  Notably, debhelper
+will I<not> expand wildcards or strip comments or strip whitespace
+in the output.
 
 =back
 
@@ -182,16 +258,6 @@ command earlier (i.e. if the command is present in the package debhelper log).
 For example, if you need to call the command with special options only for a
 couple of binary packages, pass this option to the last call of the command to
 process the rest of packages with default settings. 
-
-=item B<--ignore=>I<file>
-
-Ignore the specified file. This can be used if F<debian/> contains a debhelper
-config file that a debhelper command should not act on. Note that
-F<debian/compat>, F<debian/control>, and F<debian/changelog> can't be ignored, but
-then, there should never be a reason to ignore those files.
-
-For example, if upstream ships a F<debian/init> that you don't want
-B<dh_installinit> to install, use B<--ignore=debian/init>
 
 =item B<-P>I<tmpdir>, B<--tmpdir=>I<tmpdir>
 
@@ -253,6 +319,8 @@ B<dh_auto_>I<*> programs.
 
 Force use of the specified I<buildsystem>, instead of trying to auto-select
 one which might be applicable for the package.
+
+Pass B<none> as I<buildsystem> to disable auto-selection.
 
 =item B<-D>I<directory>, B<--sourcedir=>I<directory>, B<--sourcedirectory=>I<directory>
 
@@ -994,13 +1062,12 @@ long command line options.
 
 =item -
 
-The ELF related debhelper tools (B<dh_dwz>, B<dh_strip>, B<dh_makeshlibs>,
-B<dh_shlibdeps>) are now only run for arch dependent packages by default
-(i.e. they are excluded from B<*-indep> targets and are passed B<-a>
-by default).
-
-If you need them for B<*-indep> targets, you can add an explicit
-Build-Depends on B<dh-sequence-elf-tools>.
+The ELF related debhelper tools (B<dh_dwz>, B<dh_strip>,
+B<dh_makeshlibs>, B<dh_shlibdeps>) are now only run for arch dependent
+packages by default (i.e. they are excluded from B<*-indep> targets
+and are passed B<-a> by default). If you need them for B<*-indep>
+targets, you can add an explicit Build-Depends on
+B<dh-sequence-elf-tools>.
 
 =item -
 
@@ -1015,7 +1082,7 @@ definitions of a manpage.  This typically happens if the upstream
 build system is installing a compressed version and the package lists
 an uncompressed version of the manpage in F<<
 debian/I<package>.manpages >>.  Often the easiest fix is to remove the
-manpage from F<< debian/I<package>.manpages >> (assuming both version
+manpage from F<< debian/I<package>.manpages >> (assuming both versions
 are identical).
 
 =item -
@@ -1024,6 +1091,58 @@ The B<dh_auto_*> helpers now resets the environment variables B<HOME>
 and common B<XDG_*> variable.  B<HOME> and B<XDG_RUNTIME_DIR> are each
 set to a distinct writable directory. The rest of the environment
 variables are cleared.
+
+=item -
+
+The B<dh> command will now error if an override or hook target for an
+obsolete command are present in F<debian/rules>
+(e.g. B<override_dh_systemd_enable:>).
+
+=item -
+
+The B<dh_missing> command will now default to B<--fail-missing>.  This
+can be reverted to a non-fatal warning by explicitly passing
+B<--list-missing> like it was in compat 12.
+
+If you do not want the warning either, please omit the call to
+B<dh_missing>.  If you use the B<dh> command sequencer, then you can
+do this by inserting the an empty override target in the
+F<debian/rules> file of the relevant package.  As an example:
+
+    # Disable dh_missing
+    override_dh_missing:
+
+=item -
+
+The B<dh> command sequencer now runs B<dh_installtmpfiles> in the
+default sequence.  The B<dh_installtmpfiles> takes over handling of
+tmpfiles.d configuration files.  Related functionality in
+B<dh_installsystemd> is now disabled.
+
+=item -
+
+Many B<dh_*> tools now support limited variable expansion via the
+B<${foo}> syntax.  In many cases, this can be used to reference paths
+that contain either spaces or L<dpkg-architecture(1)> values.  While
+this can reduce the need for L<dh-exec(1)> in some cases, it is B<not>
+a replacement L<dh-exec(1)> in general.  If you need filtering,
+renaming, etc., the package will still need L<dh-exec(1)>.
+
+Please see L</Substitutions in debhelper config files> for syntax and
+available substitution variables.  To B<dh_*> tool writers, substitution
+expansion occurs as a part of the B<filearray> and B<filedoublearray>
+functions.
+
+=item -
+
+The B<dh> command sequencer will now skip all hook and override targets
+for B<dh_auto_test>, B<dh_dwz> and B<dh_strip> when B<DEB_BUILD_OPTIONS>
+lists the relevant B<nocheck> / B<nostrip> options.
+
+Any package relying on these targets to always be run should instead
+move relevant logic out of those targets.  E.g. non-test related
+packaging code from B<override_dh_auto_test> would have to be moved to
+B<execute_after_dh_auto_build> or B<execute_before_dh_auto_install>.
 
 =back
 
@@ -1199,8 +1318,10 @@ Set to B<1> to enable no-act mode.
 
 =item B<DH_OPTIONS>
 
-Anything in this variable will be prepended to the command line arguments
-of all debhelper commands.
+All debhelper tools will parse command line arguments listed in this variable
+before any command option (as if they had been prepended to the command
+line arguments).  Unfortunately, some third-party provided tools may not
+support this variable and will ignore these command line arguments.
 
 When using L<dh(1)>, it can be passed options that will be passed on to each
 debhelper command, which is generally better than using DH_OPTIONS.
@@ -1232,6 +1353,28 @@ This is intended to be used by downstreams or specific local configurations
 that require a debhelper addon to be run during multiple builds without
 having to patch a large number of rules file. If at all possible, this should
 be avoided in favor of a --with flag in the rules file.
+
+=item B<DH_COLORS>, B<DPKG_COLORS>
+
+These variables can be used to control whether debhelper commands should use
+colors in their textual output.  Can be set to "always", "auto" (the default),
+or "never".
+
+Note that B<DPKG_COLOR> also affects a number of dpkg related tools and
+debhelper uses it on the assumption that you want the same color setting for
+dpkg and debhelper.  In the off-hand chance you want different color setting
+for debhelper, you can use B<DH_COLORS> instead or in addition to
+B<DPKG_COLORS>.
+
+=item B<NO_COLOR>
+
+If no explicit request for color has been given (e.g. B<DH_COLORS> and
+B<DPKG_COLORS> are both unset), the presence of this environment variable
+cause the default color setting to be "never".
+
+The variable is defined according to L<https://no-color.org/>.  In this
+project, the environment variables (such as B<DH_COLORS>) are considered
+an explicit request for color.
 
 =item B<CFLAGS>, B<CPPFLAGS>, B<CXXFLAGS>, B<OBJCFLAGS>, B<OBJCXXFLAGS>, B<GCJFLAGS>, B<FFLAGS>, B<FCFLAGS>, B<LDFLAGS>
 

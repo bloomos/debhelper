@@ -49,6 +49,9 @@ given file, please use its B<--exclude> option (where available).
 B<dh_missing> will expand wildcards in this file (since debhelper 11.1).
 Wildcards without matches will be ignored.
 
+Supports substitution variables in compat 13 and later as
+documented in L<debhelper(7)>.
+
 =back
 
 =head1 OPTIONS
@@ -88,11 +91,11 @@ my (@installed, %helpers);
 my $srcdir = '.';
 $srcdir = $dh{SOURCEDIR} if defined $dh{SOURCEDIR};
 
-# --list-missing is the default in compat 12+
-$dh{LIST_MISSING} = 1 if !$dh{FAIL_MISSING} && !compat(11);
-
 if (!$dh{LIST_MISSING} && !$dh{FAIL_MISSING}) {
-	exit 0;
+	exit 0 if compat(11);
+	# --list-missing is the default in compat 12 and --fail-missing in compat 13+
+	my $option = compat(12) ? 'LIST_MISSING' : 'FAIL_MISSING';
+	$dh{$option} = 1;
 }
 
 # . as srcdir makes no sense, so this is a special case.
@@ -127,7 +130,7 @@ for my $file (glob('debian/.debhelper/generated/*/installed-by-*')) {
 		($target_pkg, $helper) = ($1, $2);
 	}
 
-	open(my $fh, '<', $file) or die "could not open $file: $!";
+	open(my $fh, '<', $file) or error("could not open $file: $!");
 	while (my $line = <$fh>) {
 		chomp($line);
 		next if $line =~ m/^\s*$/;

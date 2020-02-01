@@ -10,10 +10,12 @@ use strict;
 use warnings;
 use constant {
 	'UNSKIPPABLE_CLI_OPTIONS_BUILD_SYSTEM' => q(-S|--buildsystem|-D|--sourcedir(?:ectory)?|-B|--builddir(?:ectory)?),
+	'BUILD_STAMP_FILE'                     => 'debian/debhelper-build-stamp',
 };
 use Debian::Debhelper::Dh_Lib;
 use Debian::Debhelper::Sequence;
 use Debian::Debhelper::SequencerUtil;
+use Debian::Debhelper::DH::SequenceState ();
 
 our $VERSION = DH_BUILTIN_VERSION;
 
@@ -28,10 +30,29 @@ correspond to the targets of a F<debian/rules> file: B<build-arch>,
 B<build-indep>, B<build>, B<clean>, B<install-indep>, B<install-arch>,
 B<install>, B<binary-arch>, B<binary-indep>, and B<binary>.
 
-=head1 OVERRIDE TARGETS
+=head1 OVERRIDE AND HOOK TARGETS
 
 A F<debian/rules> file using B<dh> can override the command that is run
-at any step in a sequence, by defining an override target.
+at any step in a sequence, by defining an override target.  It is also
+possible to inject a commands before or after any step without affecting
+the step itself.
+
+=head2 Injecting commands before or after a step
+
+I<Note>: This feature requires debhelper 12.8 or later plus the package must
+use compatibility mode 10 or later.
+
+To inject commands before I<dh_command>, add a target named
+B<execute_before_>I<dh_command> to the rules files.  Similarly, if you
+want to inject commands after I<dh_command>, add the target
+B<execute_after_>I<dh_command>.  Both targets can be used for the same
+I<dh_command> and also even if the command is overridden (as described in
+L</Overriding a command> below).
+
+When these targets are defined, B<dh> will call the targets respectively
+before or after it would invoke I<dh_command> (or its override target).
+
+=head2 Overriding a command
 
 To override I<dh_command>, add a target named B<override_>I<dh_command> to
 the rules file. When it would normally run I<dh_command>, B<dh> will
@@ -39,12 +60,53 @@ instead call that target. The override target can then run the command with
 additional options, or run entirely different commands instead. See
 examples below.
 
-Override targets can also be defined to run only when building
-architecture dependent or architecture independent packages.
-Use targets with names like B<override_>I<dh_command>B<-arch>
-and B<override_>I<dh_command>B<-indep>.
-(Note that to use this feature, you should Build-Depend on
-debhelper 8.9.7 or above.)
+=head2 Architecture dependent/independent override and hook targets
+
+The override and hook targets can also be defined to run only
+when building architecture dependent or architecture independent
+packages. Use targets with names like B<override_>I<dh_command>B<-arch>
+and B<execute_after>I<dh_command>B<-indep>.
+
+This feature is available since debhelper 8.9.7 (for override targets)
+and 12.8 (for hook targets).
+
+=head2 Completely empty targets
+
+As a special optimization, B<dh> will skip a target if it is completely empty.
+This is mostly useful for override targets, where the command will simply be
+skipped without the overhead of invoking a dummy target.
+
+Note that the target has to be completely empty for this to work:
+
+     # Skip dh_bar - the good and optimized way
+     # Some rationale for skipping dh_bar goes here
+     override_dh_bar:
+
+
+     # Skip dh_foo - the slow way
+     override_dh_foo:
+        # Some rationale for skipping dh_foo goes here
+        # (these comments causes a dummy target to be run)
+
+=head2 Verifying targets are picked up by dh
+
+If you want to confirm that B<dh> has seen an override or a hook target, you
+can use the following command as an example:
+
+    $ dh binary --no-act | grep dh_install | head -n5
+         dh_installdirs
+         dh_install
+         debian/rules execute_after_dh_install
+         dh_installdocs
+         dh_installchangelogs
+
+The B<debian/rules execute_after_dh_install> in the output, which signals
+that B<dh> registered a B<execute_after_dh_install> target and would
+run it directly after L<dh_install(1)>.
+
+Note that L</Completely empty targets> will be omitted in the listing above.
+This makes it a bit harder to spot as you are looking for the omission of
+a command name.  But otherwise, the principle remains the same.
 
 =head1 OPTIONS
 
@@ -157,6 +219,18 @@ after a particular debhelper command is run.
 	%:
 		dh $@
 
+	# Example assumes debhelper/12.8 and compat 10+
+	execute_after_dh_fixperms:
+		chmod 4755 debian/foo/usr/bin/foo
+
+If you are on an older debhelper or compatibility level, the above
+example would have to be written as.
+
+	#!/usr/bin/make -f
+	%:
+		dh $@
+
+	# Older debhelper versions or using compat 9 or lower.
 	override_dh_fixperms:
 		dh_fixperms
 		chmod 4755 debian/foo/usr/bin/foo
@@ -238,8 +312,8 @@ Adding to the example above, suppose you need to chmod a file, but only
 when building the architecture dependent package, as it's not present
 when building only documentation.
 
-	override_dh_fixperms-arch:
-		dh_fixperms
+	# Example assumes debhelper/12.8 and compat 10+
+	execute_after_dh_fixperms-arch:
 		chmod 4755 debian/foo/usr/bin/foo
 
 =head1 INTERNALS
@@ -287,9 +361,9 @@ option to ensure they only work on architecture dependent packages.
 # Stash this away before init modifies it.
 my @ARGV_orig=@ARGV;
 my (@addons, @addon_requests);
-our ($DH_INTERNAL_ADDON_TYPE, $DH_INTERNAL_ADDON_NAME);
 
-inhibit_log();
+# Reset umask to 0022 per #944691
+umask(0022);
 
 init(options => {
 		"until=s" => \$dh{UNTIL},
@@ -313,6 +387,7 @@ init(options => {
 	# Bundling does not work well since there are unknown options.
 	bundling => 0,
 	internal_parse_dh_sequence_info => 1,
+	inhibit_log => 1,
 );
 set_buildflags();
 reject_obsolete_params();
@@ -355,280 +430,8 @@ if ($sequence eq 'debian/rules' ||
 }
 
 
-# Definitions of sequences.
-my $build_stamp_file = 'debian/debhelper-build-stamp';
-my %sequences;
-my @bd_minimal = qw{
-	dh_testdir
-};
-my @bd = (@bd_minimal, qw{
-	dh_update_autotools_config
-	dh_auto_configure
-	dh_auto_build
-	dh_auto_test
-});
-my @i = (qw{
-	dh_testroot
-	dh_prep
-	dh_installdirs
-	dh_auto_install
+load_sequence_addon('root-sequence', SEQUENCE_TYPE_BOTH);
 
-	dh_install
-	dh_installdocs
-	dh_installchangelogs
-	dh_installexamples
-	dh_installman
-
-	dh_installcatalogs
-	dh_installcron
-	dh_installdebconf
-	dh_installemacsen
-	dh_installifupdown
-	dh_installinfo
-	dh_installinit
-},
-   (!compat(10) ? qw(dh_installsystemd) : qw()),
-   (!compat(11) ? qw(dh_installsystemduser) : qw()),
-
-qw{
-	dh_installmenu
-	dh_installmime
-	dh_installmodules
-	dh_installlogcheck
-	dh_installlogrotate
-	dh_installpam
-	dh_installppp
-	dh_installudev
-	dh_installgsettings
-},
-   (!compat(11) ? qw(dh_installinitramfs) : qw()),
-qw{
-	dh_bugfiles
-	dh_ucf
-	dh_lintian
-	dh_gconf
-	dh_icons
-	dh_perl
-	dh_usrlocal
-
-	dh_link
-	dh_installwm
-	dh_installxfonts
-	dh_strip_nondeterminism
-	dh_compress
-	dh_fixperms
-	dh_missing
-});
-
-# Looking for dh_dwz, dh_strip, dh_makeshlibs, dh_shlibdeps (et al)?  They are
-# in the elf-tools addon.
-my @b=qw{
-	dh_installdeb
-	dh_gencontrol
-	dh_md5sums
-	dh_builddeb
-};
-
-sub _add_sequence {
-	my @args = @_;
-	my $seq = Debian::Debhelper::Sequence->new(@args);
-	my $name = $seq->name;
-	$sequences{$name} = $seq;
-	if ($seq->allowed_subsequences eq SEQUENCE_ARCH_INDEP_SUBSEQUENCES) {
-		for my $subseq ((SEQUENCE_TYPE_ARCH_ONLY, SEQUENCE_TYPE_INDEP_ONLY)) {
-			my $subname = "${name}-${subseq}";
-			$sequences{$subname} = $seq;
-		}
-	}
-	return;
-}
-
-_add_sequence('build', SEQUENCE_ARCH_INDEP_SUBSEQUENCES, @bd);
-_add_sequence('install', SEQUENCE_ARCH_INDEP_SUBSEQUENCES, to_rules_target("build"), @i);
-_add_sequence('binary', SEQUENCE_ARCH_INDEP_SUBSEQUENCES, to_rules_target("install"), @b);
-_add_sequence('clean', SEQUENCE_NO_SUBSEQUENCES, @bd_minimal, qw{
-	dh_auto_clean
-	dh_clean
-});
-
-# Additional command options
-my %command_opts;
-my %commands_added_by_addon;
-
-sub _assert_not_conditional_sequence_addon {
-	my ($feature) = @_;
-	return if $DH_INTERNAL_ADDON_TYPE eq 'both';
-	warning("The add-on ${DH_INTERNAL_ADDON_NAME} relies on a feature (${feature}) (possibly indirectly), which is "
-	    . 'not supported for conditional debhelper sequence add-ons.');
-	warning("Hint: You may have to move the build-dependency for dh-sequence-${DH_INTERNAL_ADDON_NAME} to "
-		. 'Build-Depends to avoid this error assuming it is possible to use the sequence unconditionally.');
-	die("${feature} is not supported for conditional dh sequence add-ons.\n");
-}
-
-sub _filter_sequences_for_conditional_add_ons {
-	my @sequences = @_;
-	# If it is unconditional, then there is no issues.
-	return @sequences if $DH_INTERNAL_ADDON_TYPE eq 'both' or not @sequences;
-	for my $seq (@sequences) {
-		# Typically, if you add a command to a sequence, then you will in fact add it to two. E.g.
-		# Adding dh_foo after dh_installdocs will affect both install-arch AND install-indep.  We want
-		# this to "just work(tm)" with a conditional add-on to avoid too much hassle (i.e. only affect
-		# the relevant sequence).  At the same time, we must abort if a sequence like "clean" is
-		# affected.
-		#
-		# We solve the above by checking if the sequence has an -arch + an -indep variant and then
-		# insert the command only for that sequence variant.
-
-		if ($seq->allowed_subsequences ne SEQUENCE_ARCH_INDEP_SUBSEQUENCES) {
-			my $sequence_name = $seq->name;
-			warning("The add-on ${DH_INTERNAL_ADDON_NAME} attempted to modify the sequence ${sequence_name} (possibly "
-				. "indirectly) but the add-on is conditional for \"*-${DH_INTERNAL_ADDON_TYPE}\" targets");
-			warning("Hint: You may have to move the build-dependency for dh-sequence-${DH_INTERNAL_ADDON_NAME} to "
-				. 'Build-Depends to avoid this error assuming it is possible to use the sequence unconditionally.');
-			die("The add-on ${DH_INTERNAL_ADDON_NAME} cannot be use conditionally for \"*-${DH_INTERNAL_ADDON_TYPE}\""
-				. " targets\n");
-		}
-	}
-	return @sequences;
-}
-
-sub _register_cmd_added_by_addon {
-	my ($cmd) = @_;
-	my $existing = $commands_added_by_addon{$cmd};
-	if ($existing) {
-		if ($existing->{'addon-type'} ne $DH_INTERNAL_ADDON_TYPE) {
-			my $old_addon_name = $existing->{'addon-name'};
-			my $old_addon_type = $existing->{'addon-type'};
-			# Technically, "both" could be made compatible with "indep" OR "arch" (but not both at the same time).
-			# Implement if it turns out to be relevant.
-			warning("Both dh sequence add-ons ${DH_INTERNAL_ADDON_NAME} and ${old_addon_name} have attempted to add "
-			    . "the command $cmd (possibly indirectly).");
-			warning("However, the two add-ons do not have compatible constraints (${DH_INTERNAL_ADDON_TYPE} vs. "
-			    . "${old_addon_type}).");
-			warning("Hint: You may have to move the build-dependency for dh-sequence-<X> to "
-				. ' the same build-dependency field to avoid this error assuming it is possible.');
-			die("Multiple sequences have conflicting requests for $cmd.\n");
-		}
-		return;
-	}
-
-	$commands_added_by_addon{$cmd} = {
-		'addon-name' => $DH_INTERNAL_ADDON_NAME,
-		'addon-type' => $DH_INTERNAL_ADDON_TYPE,
-	};
-	return;
-}
-
-sub _sequences_containing_cmd {
-	my ($cmd) = @_;
-	my @sequences;
-	foreach my $sequence_name (keys %sequences) {
-		my $seq = $sequences{$sequence_name};
-		for my $scmd (@{$seq->{'_cmds'}}) {
-			if ($scmd->{'command'} eq $cmd) {
-				push(@sequences, $seq);
-				last;
-			}
-		}
-	}
-	return @sequences;
-}
-
-sub _seq_cmd {
-	my ($cmd_name) = @_;
-	return {
-		'command'             => $cmd_name,
-		'command-options'     => [],
-		'sequence-limitation' => $DH_INTERNAL_ADDON_TYPE,
-	};
-}
-
-# sequence addon interface
-sub _insert {
-	my ($offset, $existing, $new) = @_;
-	my @affected_sequences = _sequences_containing_cmd($existing);
-	@affected_sequences = _filter_sequences_for_conditional_add_ons(@affected_sequences);
-	return if not @affected_sequences;
-	_register_cmd_added_by_addon($new);
-	for my $seq (@affected_sequences) {
-		$seq->_insert($offset, $existing, _seq_cmd($new));
-	}
-	return 1;
-}
-sub insert_before {
-	return _insert(-1, @_);
-}
-sub insert_after {
-	return _insert(1, @_);
-}
-sub remove_command {
-	my ($command) = @_;
-	# Implement if actually needed (I *think* it basically means to transform dh_foo to dh_foo -a/-i)
-	_assert_not_conditional_sequence_addon('remove_command');
-	my @affected_sequences = _sequences_containing_cmd($command);
-	@affected_sequences = _filter_sequences_for_conditional_add_ons(@affected_sequences);
-	return 1 if not @affected_sequences;
-	for my $seq (@affected_sequences) {
-		$seq->remove_command($command);
-	}
-	return 1;
-}
-sub add_command {
-	my ($command, $sequence) = @_;
-	_assert_not_conditional_sequence_addon('add_command');
-	_register_cmd_added_by_addon($command);
-	if (not exists($sequences{$sequence})) {
-		_add_sequence($sequence, SEQUENCE_NO_SUBSEQUENCES, _seq_cmd($command));
-	} else {
-		my $seq = $sequences{$sequence};
-		_filter_sequences_for_conditional_add_ons($seq);
-		$seq->add_command_at_start(_seq_cmd($command))
-	}
-	return 1;
-}
-sub add_command_at_end {
-	my ($command, $sequence) = @_;
-	_assert_not_conditional_sequence_addon('add_command');
-	_register_cmd_added_by_addon($command);
-	if (not exists($sequences{$sequence})) {
-		_add_sequence($sequence, SEQUENCE_NO_SUBSEQUENCES, _seq_cmd($command));
-	} else {
-		my $seq = $sequences{$sequence};
-		_filter_sequences_for_conditional_add_ons($seq);
-		$seq->add_command_at_end(_seq_cmd($command))
-	}
-	return 1;
-}
-
-sub add_command_options {
-	my $command=shift;
-	# Implement if actually needed (Complicated as dh_foo becomes dh_foo -a && dh_foo -i <extra_options>
-	# and that implies smarter deduplication logic)
-	_assert_not_conditional_sequence_addon('add_command_options');
-	push @{$command_opts{$command}}, @_;
-	return 1;
-}
-
-sub remove_command_options {
-	my ($command, @cmd_options) = @_;
-	# Implement if actually needed (Complicated as dh_foo <extra_options> becomes
-	#   dh_foo -a  <extra_options> && dh_foo -i and that implies smarter deduplication logic)
-	_assert_not_conditional_sequence_addon('remove_command_options');
-	if (@cmd_options) {
-		# Remove only specified options
-		if (my $opts = $command_opts{$command}) {
-			foreach my $opt (@cmd_options) {
-				$opts = [ grep { $_ ne $opt } @$opts ];
-			}
-			$command_opts{$command} = $opts;
-		}
-	}
-	else {
-		# Clear all additional options
-		delete $command_opts{$command};
-	}
-	return 1;
-}
 
 sub list_addons {
 	my %addons;
@@ -653,90 +456,6 @@ sub list_addons {
 	exit 0;
 }
 
-sub _compute_addons {
-	my ($sequence_name, @addon_requests_from_args) = @_;
-	my (@enabled_addons, %disabled_addons, %enabled);
-	my @addon_requests;
-	my $sequence_type = sequence_type($sequence_name);
-
-	my %addon_constraints = %{ Debian::Debhelper::Dh_Lib::bd_dh_sequences() };
-
-	# Inject elf-tools early as other addons rely on their presence and it historically
-	# has been considered a part of the "core" sequence.
-	if (exists($addon_constraints{'elf-tools'})) {
-		# Explicitly requested; respect that
-		push(@addon_requests, '+elf-tools');
-	} elsif (compat(12, 1)) {
-		# In compat 12 and earlier, we only inject the sequence if there are arch
-		# packages present and the sequence requires it.
-		if (getpackages('arch') and $sequence_type ne SEQUENCE_TYPE_INDEP_ONLY) {
-			push(@addon_requests, '+elf-tools');
-		}
-	} else {
-		# In compat 13, we always inject the addon if not explicitly requested and
-		# then flag it as arch_only
-		push(@addon_requests, '+elf-tools');
-		$addon_constraints{'elf-tools'} = SEQUENCE_TYPE_ARCH_ONLY if not exists($addon_constraints{'elf-tools'});
-	}
-
-	# Order is important; DH_EXTRA_ADDONS must come before everything
-	# else; then comes built-in and finally argument provided add-ons
-	# requests.
-	push(@addon_requests,  map { "+${_}" } split(",", $ENV{DH_EXTRA_ADDONS}))
-		if $ENV{DH_EXTRA_ADDONS};
-	if (not compat(9, 1)) {
-		# Enable autoreconf'ing by default in compat 10 or later.
-		push(@addon_requests, '+autoreconf');
-
-		# Enable systemd support by default in compat 10 or later.
-		# - compat 11 injects the dh_installsystemd tool directly in the
-		#   sequence instead of using a --with sequence.
-		push(@addon_requests, '+systemd') if compat(10, 1);
-		push(@addon_requests, '+build-stamp');
-	}
-	for my $addon_name (sort(keys(%addon_constraints))) {
-		my $addon_type = $addon_constraints{$addon_name};
-
-		# Special-case for the "clean" target to avoid B-D-I dependencies in that for conditional add-ons
-		next if $sequence_name eq 'clean' and $addon_type ne SEQUENCE_TYPE_BOTH;
-		if ($addon_type eq 'both' or $sequence_type eq 'both' or $addon_type eq $sequence_type) {
-			push(@addon_requests, "+${addon_name}");
-		}
-	}
-
-	push(@addon_requests, @addon_requests_from_args);
-
-	# Removing disabled add-ons are expensive (O(N) per time), so we
-	# attempt to make removals in bulk.  Note that we have to be order
-	# preserving (due to #885580), so there is a limit to how "smart"
-	# we can be.
-	my $flush_disable_cache = sub {
-		@enabled_addons = grep { not exists($disabled_addons{$_}) } @enabled_addons;
-		for my $addon (keys(%disabled_addons)) {
-			delete($enabled{$addon});
-		}
-		%disabled_addons = ();
-	};
-
-	for my $request (@addon_requests) {
-		if ($request =~ s/^[+]//) {
-			$flush_disable_cache->() if %disabled_addons;
-			push(@enabled_addons, $request) if not $enabled{$request}++;
-		} elsif ($request =~ s/^-//) {
-			$disabled_addons{$request} = 1;
-		} else {
-			error("Internal error: Invalid add-on request: $request (Missing +/- prefix)");
-		}
-	}
-
-	$flush_disable_cache->() if %disabled_addons;
-	return map {
-		{
-			'name' => $_,
-			'addon-type' => $addon_constraints{$_} // SEQUENCE_TYPE_BOTH,
-		}
-	} @enabled_addons;
-}
 
 # The list of all packages that can be acted on.
 my @packages=@{$dh{DOPACKAGES}};
@@ -757,17 +476,12 @@ my %sequence2packages = (
 	'binary'  => \@packages,
 );
 
-my %completed_sequences;
-
-# Get the options to pass to commands in the sequence.
-# Filter out options intended only for this program.
-my (@options, %seen_options);
-my ($unoptimizable_user_option, $unoptimizable_option_bundle, $sequence_unpack_flags) = (0, 0, 0);
+my $sequence_unpack_flags = 0;
 
 if ($sequence eq 'build-arch' ||
     $sequence eq 'install-arch' ||
     $sequence eq 'binary-arch') {
-	push @options, "-a";
+	push(@Debian::Debhelper::DH::SequenceState::options, "-a");
 	# as an optimisation, remove from the list any packages
 	# that are not arch dependent
 	@packages = @{$sequence2packages{$sequence}};
@@ -775,7 +489,7 @@ if ($sequence eq 'build-arch' ||
 elsif ($sequence eq 'build-indep' ||
        $sequence eq 'install-indep' ||
        $sequence eq 'binary-indep') {
-	push @options, "-i";
+	push(@Debian::Debhelper::DH::SequenceState::options, "-i");
 	# ditto optimisation for arch indep
 	@packages = @{$sequence2packages{$sequence}};
 }
@@ -786,152 +500,51 @@ if (not @arch_packages) {
 	$sequence_unpack_flags = FLAG_OPT_SOURCE_BUILDS_NO_INDEP_PACKAGES;
 }
 
-@addons = _compute_addons($sequence, @addon_requests);
+@addons = compute_selected_addons($sequence, @addon_requests);
 
 # Load addons, which can modify sequences.
 foreach my $addon (@addons) {
 	my $addon_name = $addon->{'name'};
 	my $addon_type = $addon->{'addon-type'};
-	my $mod="Debian::Debhelper::Sequence::${addon_name}";
-	$mod=~s/-/_/g;
-	local $DH_INTERNAL_ADDON_NAME = $addon_name;
-	local $DH_INTERNAL_ADDON_TYPE = $addon_type;
-	eval "use $mod";
-	if ($@) {
-		error("unable to load addon ${addon_name}: $@");
-	}
+	load_sequence_addon($addon_name, $addon_type);
 }
-if (%commands_added_by_addon) {
-	while (my ($cmd, $addon) = each(%commands_added_by_addon)) {
+
+if (%Debian::Debhelper::DH::SequenceState::commands_added_by_addon) {
+	while (my ($cmd, $addon) = each(%Debian::Debhelper::DH::SequenceState::commands_added_by_addon)) {
 		my $addon_type = $addon->{'addon-type'};
 		if ($addon_type eq 'indep') {
-			unshift(@{$command_opts{$cmd}}, '-i');
+			unshift(@{$Debian::Debhelper::DH::SequenceState::command_opts{$cmd}}, '-i');
 		} elsif ($addon_type eq 'arch') {
-			unshift(@{$command_opts{$cmd}}, '-a');
+			unshift(@{$Debian::Debhelper::DH::SequenceState::command_opts{$cmd}}, '-a');
 		}
 	}
 }
 
 
-if (! exists $sequences{$sequence}) {
-	error "Unknown sequence $sequence (choose from: ".
-		join(" ", sort keys %sequences).")";
+if (! exists($Debian::Debhelper::DH::SequenceState::sequences{$sequence})) {
+	error("Unknown sequence $sequence (choose from: ".
+		join(" ", sort(keys(%Debian::Debhelper::DH::SequenceState::sequences))).")");
 }
 
-while (@ARGV_orig) {
-	my $opt=shift @ARGV_orig;
-	if ($opt =~ /^--?(after|until|before|with|without)$/) {
-		shift @ARGV_orig;
-		next;
-	}
-	elsif ($opt =~ /^--?(no-act|remaining|(after|until|before|with|without)=)/) {
-		next;
-	}
-	elsif ($opt=~/^-/) {
-		if (not @options and $opt eq '--parallel' or $opt eq '--no-parallel') {
-			my $max_parallel;
-			# Ignore the option if it is the default for the given
-			# compat level.
-			next if compat(9) and $opt eq '--no-parallel';
-			next if not compat(9) and $opt eq '--parallel';
-			# Having an non-empty "@options" hurts performance quite a
-			# bit.  At the same time, we want to promote the use of
-			# --(no-)parallel, so "tweak" the options a bit if there
-			# is no reason to include this option.
-			$max_parallel = get_buildoption('parallel') // 1;
-			next if $max_parallel == 1;
-		}
-		if ($opt =~ m/^(--[^=]++)(?:=.*)?$/ or $opt =~ m/^(-[^-])$/) {
-			my $optname = $1;
-			if (length($optname) > 2 and (compat(12, 1) or $optname =~ m/^-[^-][^=]/)) {
-				# We cannot optimize bundled options but we can optimize a single
-				# short option with an explicit parameter (-B=F is ok, -BF is not)
-				# In compat 12 or earlier, we also punt on long options due to
-				# auto-abbreviation.
-				$unoptimizable_option_bundle = 1
-			}
-			$seen_options{$optname} = 1;
-		} else {
-			$unoptimizable_user_option = 1;
-		}
-		push @options, "-O".$opt;
-	}
-	elsif (@options) {
-		if ($options[$#options]=~/^-O--/) {
-			$options[$#options].="=".$opt;
-		}
-		else {
-			$unoptimizable_user_option = 1;
-			$options[$#options].=$opt;
-		}
-	}
-	else {
-		error "Unknown parameter: $opt";
-	}
-}
+parse_dh_cmd_options(@ARGV_orig);
 
 # Figure out at what point in the sequence to start for each package.
-my (%logged, %startpoint, %stamp_file);
+my (%logged, %startpoint, $completed_sequences);
 
-if ( -f $build_stamp_file and not compat(9)) {
-	open(my $fd, '<', $build_stamp_file) or error("open($build_stamp_file, ro) failed: $!");
-	while (my $line = <$fd>) {
-		chomp($line);
-		$stamp_file{$line} = 1;
-	}
-	close($fd);
-	my $build_indep_target_done = 1;
-	my $build_arch_target_done = 1;
-	for my $pkg (@{$sequence2packages{'build-arch'}}) {
-		if (not $stamp_file{$pkg}) {
-			$build_arch_target_done = 0;
-			last;
-		}
-	}
-	for my $pkg (@{$sequence2packages{'build-indep'}}) {
-		if (not $stamp_file{$pkg}) {
-			$build_indep_target_done = 0;
-			last;
-		}
-	}
-	$completed_sequences{'build-arch'} = 1 if $build_arch_target_done;
-	$completed_sequences{'build-indep'} = 1 if $build_indep_target_done;
-	$completed_sequences{'build'} = 1 if $build_indep_target_done and $build_arch_target_done;
-}
+$completed_sequences = _check_for_completed_sequences(\%sequence2packages);
 
 # In compat <= 8, the sequences are always inlined (those versions do not
 # recurse into debian/rules anyway).  In compat 9+, we never inline an
 # existing rules target.
-my ($rules_targets, $full_sequence) = unpack_sequence(\%sequences,
+my ($rules_targets, $full_sequence) = unpack_sequence(\%Debian::Debhelper::DH::SequenceState::sequences,
 														$sequence,
 														(!compat(8) ? 0 : 1),
-														\%completed_sequences,
+														$completed_sequences,
 														$sequence_unpack_flags,
 														);
-my $stoppoint = $#{$full_sequence};
+check_for_obsolete_commands($full_sequence);
 
-if (compat(9)) {
-	foreach my $package (@packages) {
-		my @log = load_log($package, \%logged);
-		# Find the last logged command that is in the sequence, and
-		# continue with the next command after it. If no logged
-		# command is in the sequence, we're starting at the beginning..
-		$startpoint{$package} = 0;
-		COMMAND:
-		foreach my $command (reverse @log) {
-			foreach my $i (0 .. $#{$full_sequence}) {
-				if ($command eq $full_sequence->[$i]) {
-					$startpoint{$package} = $i + 1;
-					last COMMAND;
-				}
-			}
-		}
-	}
-} else {
-	foreach my $package (@packages) {
-		$startpoint{$package} = 0;
-	}
-}
+%startpoint = compute_starting_point_in_sequences(\@packages, $full_sequence, \%logged);
 
 for my $rules_command (@{$rules_targets}) {
 	my $rules_target = extract_rules_target_name($rules_command)
@@ -940,16 +553,16 @@ for my $rules_command (@{$rules_targets}) {
 	# a fresh invocation of debian/rules and any sub-dh commands.
 	delete($ENV{DH_INTERNAL_OPTIONS});
 	delete($ENV{DH_INTERNAL_OVERRIDE});
-	run("debian/rules", $rules_target);
+	run_sequence_command_and_exit_on_failure("debian/rules", $rules_target);
 	my $override_packages = $sequence2packages{$rules_target} // \@packages;
 	for my $package (@{$override_packages}) {
-		my (undef, $seq) = unpack_sequence(\%sequences, $rules_target, 1);
+		my (undef, $seq) = unpack_sequence(\%Debian::Debhelper::DH::SequenceState::sequences, $rules_target, 1);
 		COMMAND: for my $c (reverse(@{$seq})) {
 			for my $j (0 .. $#{$full_sequence}) {
 				if ($c eq $full_sequence->[$j]) {
 					# Unfortunately, we do not guarantee any order
 					# between the run targets.  Assuming e.g.
-					# "install-arch" and "build" are opague targets
+					# "install-arch" and "build" are opaque targets
 					# then we could process "install-arch" first and
 					# then "build".  In this case, it is important
 					# that we do not "reset" the starting point for
@@ -964,183 +577,40 @@ for my $rules_command (@{$rules_targets}) {
 	}
 }
 
-# Now run the commands in the sequence.
-foreach my $i (0..$stoppoint) {
-	my $command = $full_sequence->[$i];
+run_through_command_sequence($full_sequence, \%startpoint, \%logged,
+	\@Debian::Debhelper::DH::SequenceState::options,
+	\@packages, \@arch_packages, \@indep_packages);
 
-	# Figure out which packages need to run this command.
-	my @todo;
-	my @opts=@options;
-	my @filtered_packages;
-	if (grep { $_ eq '-i'} @{$command_opts{$command}}) {
-		if (grep { $_ eq '-a'} @{$command_opts{$command}}) {
-			@filtered_packages = @packages;
-		} else {
-			@filtered_packages = @indep_packages;
-		}
-	} elsif (grep { $_ eq '-a'} @{$command_opts{$command}}) {
-		@filtered_packages = @arch_packages;
-	} else {
-		@filtered_packages = @packages;
-	}
-	foreach my $package (@filtered_packages) {
-		if ($startpoint{$package} > $i ||
-		    $logged{$package}{$full_sequence->[$i]}) {
-			push @opts, "-N$package";
-		}
-		else {
-			push @todo, $package;
-		}
-	}
-	next unless @todo;
 
-	my $rules_target = extract_rules_target_name($command);
-	error("Internal error: $command is a rules target, but it is not supported to be!?") if defined($rules_target);
-
-	if (my $stamp_file = stamp_target($command)) {
-		my %seen;
-		print "   create-stamp ".escape_shell($stamp_file)."\n";
-
-		next if $dh{NO_ACT};
-		open(my $fd, '+>>', $stamp_file) or error("open($stamp_file, rw) failed: $!");
-		# Seek to the beginning
-		seek($fd, 0, 0) or error("seek($stamp_file) failed: $!");
+sub _check_for_completed_sequences {
+	my ($sequence2packages) = @_;
+	my (%completed, %stamp_file_content);
+	if ( -f BUILD_STAMP_FILE and not compat(9)) {
+		open(my $fd, '<', BUILD_STAMP_FILE) or error("open(${\BUILD_STAMP_FILE}, ro) failed: $!");
 		while (my $line = <$fd>) {
 			chomp($line);
-			$seen{$line} = 1;
+			$stamp_file_content{$line} = 1;
 		}
-		for my $pkg (grep { not exists $seen{$_} } @todo) {
-			print {$fd} "$pkg\n";
-		}
-		close($fd) or error("close($stamp_file) failed: $!");
-		next;
-	}
-
-	# Check for override targets in debian/rules, and run instead of
-	# the usual command. (The non-arch-specific override is tried first,
-	# for simplest semantics; mixing it with arch-specific overrides
-	# makes little sense.)
-	my @oldtodo=@todo;
-	foreach my $override_type (undef, "arch", "indep") {
-		@todo = run_override($override_type, $command, \@todo, @opts);
-	}
-	next unless @todo;
-
-	next if can_skip($command, @todo);
-
-	# No need to run the command for any packages handled by the
-	# override targets.
-	my %todo=map { $_ => 1 } @todo;
-	foreach my $package (@oldtodo) {
-		if (! $todo{$package}) {
-			push @opts, "-N$package";
-		}
-	}
-
-	run($command, @opts);
-}
-
-sub run {
-	my ($command, @options) = @_;
-
-	# Include additional command options if any
-	unshift @options, @{$command_opts{$command}}
-		if exists $command_opts{$command};
-
-	# 3 space indent lines the command being run up under the
-	# sequence name after "dh ".
-	if (!$dh{QUIET}) {
-		print "   ".escape_shell($command, @options)."\n";
-	}
-
-	return if $dh{NO_ACT};
-
-	my $ret=system { $command } $command, @options;
-	if ($ret >> 8 != 0) {
-		exit $ret >> 8;
-	}
-	elsif ($ret) {
-		exit 1;
-	}
-}
-
-# Tries to run an override target for a command. Returns the list of
-# packages that it was unable to run an override target for.
-sub run_override {
-	my ($override_type, $command, $packages, @options) = @_;
-
-	my $override="override_$command".
-		(defined $override_type ? "-".$override_type : "");
-
-	# Check which packages are of the right architecture for the
-	# override_type.
-	my (@todo, @rest);
-	my $has_explicit_target = rules_explicit_target($override);
-
-	if (defined $override_type) {
-		foreach my $package (@{$packages}) {
-			my $isall=package_is_arch_all($package);
-			if (($override_type eq 'indep' && $isall) ||
-				($override_type eq 'arch' && !$isall)) {
-				push @todo, $package;
-			} else {
-				push @rest, $package;
-				push @options, "-N$package";
+		close($fd);
+		my $build_indep_target_done = 1;
+		my $build_arch_target_done = 1;
+		for my $pkg (@{$sequence2packages->{'build-arch'}}) {
+			if (not $stamp_file_content{$pkg}) {
+				$build_arch_target_done = 0;
+				last;
 			}
 		}
+		for my $pkg (@{$sequence2packages->{'build-indep'}}) {
+			if (not $stamp_file_content{$pkg}) {
+				$build_indep_target_done = 0;
+				last;
+			}
+		}
+		$completed{'build-arch'} = 1 if $build_arch_target_done;
+		$completed{'build-indep'} = 1 if $build_indep_target_done;
+		$completed{'build'} = 1 if $build_indep_target_done and $build_arch_target_done;
 	}
-	else {
-		@todo=@{$packages};
-	}
-
-	return @{$packages} unless defined $has_explicit_target; # no such override
-	return @rest if ! $has_explicit_target; # has empty override
-	return @rest unless @todo; # has override, but no packages to act on
-
-	if (defined $override_type) {
-		# Ensure appropriate -a or -i option is passed when running
-		# an arch-specific override target.
-		my $opt=$override_type eq "arch" ? "-a" : "-i";
-		push @options, $opt unless grep { $_ eq $opt } @options;
-	}
-
-	# Discard any override log files before calling the override
-	# target
-	if (not compat(9)) {
-		my @files = glob('debian/*.debhelper.log');
-		rm_files(@files) if @files;
-	}
-	# This passes the options through to commands called
-	# inside the target.
-	$ENV{DH_INTERNAL_OPTIONS}=join("\x1e", @options);
-	$ENV{DH_INTERNAL_OVERRIDE}=$command;
-	run("debian/rules", $override);
-	delete $ENV{DH_INTERNAL_OPTIONS};
-	delete $ENV{DH_INTERNAL_OVERRIDE};
-
-	# Update log for overridden command now that it has
-	# finished successfully.
-	# (But avoid logging for dh_clean since it removes
-	# the log earlier.)
-	if (! $dh{NO_ACT} && $command ne 'dh_clean' && compat(9)) {
-		write_log($command, @todo);
-		commit_override_log(@todo);
-	}
-
-	# Override targets may introduce new helper files.  Strictly
-	# speaking this *shouldn't* be necessary, but lets make no
-	# assumptions.
-	Debian::Debhelper::Dh_Lib::dh_clear_unsafe_cache();
-
-	return @rest;
-}
-
-sub stamp_target {
-	my ($command) = @_;
-	if ($command =~ s/^create-stamp\s+//) {
-		return $command;
-	}
-	return;
+	return \%completed;
 }
 
 
@@ -1152,73 +622,6 @@ sub reject_obsolete_params {
 	}
 }
 
-my %skipinfo;
-sub can_skip {
-	my ($command, @packages) = @_;
-
-	return 0 if $dh{NO_ACT} and not $ENV{DH_INTERNAL_TEST_CAN_SKIP};
-
-	return 0 if $unoptimizable_user_option ||
-		(exists $ENV{DH_OPTIONS} && length $ENV{DH_OPTIONS});
-
-	return 0 if exists($command_opts{$command})
-		and @{$command_opts{$command}};
-
-	if (! defined $skipinfo{$command}) {
-		$skipinfo{$command}=[extract_skipinfo($command)];
-	}
-	my @skipinfo=@{$skipinfo{$command}};
-	return 0 unless @skipinfo;
-	return 1 if scalar(@skipinfo) == 1 and $skipinfo[0] eq 'always-skip';
-	my ($all_pkgs, $had_cli_options);
-
-	foreach my $skipinfo (@skipinfo) {
-		my $type = 'pkgfile';
-		my $need = $skipinfo;
-		if ($skipinfo=~/^([a-zA-Z0-9-_]+)\((.*)\)$/) {
-			($type, $need) = ($1, $2);
-		}
-		if ($type eq 'tmp') {
-			foreach my $package (@packages) {
-				my $tmp = tmpdir($package);
-				return 0 if -e "$tmp/$need";
-			}
-		} elsif ($type eq 'pkgfile' or $type eq 'pkgfile-logged') {
-			my $pkgs;
-			if ($type eq 'pkgfile') {
-				$pkgs = \@packages;
-			} else {
-				$all_pkgs //= [ getpackages() ];
-				$pkgs = $all_pkgs;
-			}
-			# Use the secret bulk check call
-			return 0 if pkgfile($pkgs, $need) ne '';
-		} elsif ($type eq 'cli-options') {
-			$had_cli_options = 1;
-			# If cli-options is empty, we know the helper does not
-			# react to any thing and can always be skipped.
-			next if $need =~ m/^\s*$/;
-			# Long options are subject to abbreviations so it is
-			# very difficult to implement this optimization with
-			# long options.
-			return 0 if $unoptimizable_option_bundle;
-			$need =~ s/(?:^|\s)BUILDSYSTEM(?:\s|$)/${\UNSKIPPABLE_CLI_OPTIONS_BUILD_SYSTEM}/;
-			my @behavior_options = split(qr/\Q|\E/, $need);
-			for my $opt (@behavior_options) {
-				return 0 if exists($seen_options{$opt});
-			}
-		} elsif ($type eq 'buildsystem') {
-			require Debian::Debhelper::Dh_Buildsystems;
-			my $system = Debian::Debhelper::Dh_Buildsystems::load_buildsystem(undef, $need);
-			return 0 if defined($system);
-		} else {
-			# Unknown hint - make no assumptions
-			return 0;
-		}
-	}
-	return 0 if not $had_cli_options and %seen_options;
-	return 1;
-}
 
 =head1 SEE ALSO
 

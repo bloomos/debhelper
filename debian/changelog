@@ -1,3 +1,123 @@
+debhelper (12.9) unstable; urgency=medium
+
+  [ Niels Thykier ]
+  * debhelper.7: Clarify how DH_OPTIONS works and that some
+    third-party tools may ignore it if they do not support
+    it.  Thanks to Andrej Shadura for reporting the issue
+    over IRC.
+  * doc/PROGRAMMING: Introduce a section on the NOOP PROMISE
+    comment.
+  * dh: In compat 13, skip calls to hook and override targets
+    for dh_auto_test, dh_dwz and dh_strip.  Thanks to
+    Mike Hommey for suggesting it.  (Closes: #568897)
+  * Dh_Getopt.pm: Remove support for "--ignore".  No package
+    uses it any more.  For most parts, it has been replaced
+    by the "3.0 (quilt)" source format.
+  * debian/changelog: Clarify that substitutions change in
+    12.8 only apply to the maintscript file (and not
+    maintainer scripts) for dh_installdeb.
+  * debhelper.7: Improve text in compat 13 section.
+  * autoconf.pm: Only consider "configure" as an autoconf
+    script if it is a file (and not a directory).  Thanks to
+    Andrius Merkys for reporting the bug and providing a
+    patch.  (Closes: #949396)
+  * debian/control: Bump Standards-Version to 4.5.0 - no
+    changes required.
+  * dh_shlibdeps: Pass "--" in front of filenames passed to
+    file(1).  Thanks to Christoph Biedl for the suggestion.
+    (Closes: #949538)
+  * dh_strip: Ditto
+  * dh.1: Improve documentation for override targets and
+    include a section on the new hook target.
+    (Closes: #885994)
+  * Dh_Lib.pm: Make it possible to disable the command
+    logging by passing "inhibit_log => 1" to the init sub.
+    Furthermore, the logging is now only enabled when init
+    is called (and not disabled by that option or
+    inhibit_log()).  This prevents Dh_Lib from triggering
+    a log write just by being loaded.
+  * dh: Refactor addon loading.  As a side-effect, dh no
+    longer leaks as many functions into the scope of addons.
+    Addons depending on the previous behaviour may now fail
+    due to calls to undefined subroutintes and will need to
+    be fixed.
+  * dh_installinitramfs.1: Correct the name of localized
+    versions of dh_installinitramfs so that man can find
+    them.
+
+  [ Thorsten Glaser ]
+  * dh_auto_*: Make it possible to disable build systems by
+    passing --buildsystem=none.  Previously this would
+    require overriding each and every dh_auto_* tool.
+    (Closes: #949635)
+
+ -- Niels Thykier <niels@thykier.net>  Mon, 27 Jan 2020 20:45:05 +0000
+
+debhelper (12.8) unstable; urgency=medium
+
+  [ Niels Thykier ]
+  * Dh_Lib.pm: Simplify internal loggning of which commands
+    have been run.  We are no longer interested in whether
+    it was an override target or not.
+  * dh: Support "execute_before_X" and "execute_after_X"
+    targets in debian/rules.  This is useful for injecting
+    commands before or after the command "X" that dh runs.
+    Note this feature requires compat 10 or later due to
+    internal limitations in debhelper.  Attempts to use
+    it in compat 9 will trigger an error.  Thanks to
+    Christoph Berg for the suggestion.  (Closes: #885994)
+  * dh: Detect and warn about override and hook targets
+    for known obsolete commands.  In compat 13, this will
+    be an error instead of a warning.
+  * dh: Reset umask to 0022 as a consistent default value.
+    Thanks to Thorsten Glaser for the suggestion.
+    (Closes: #944691)
+  * dh_missing: The --fail-missing parameter is now default
+    in compat 13.  Thanks to Mattia Rizzolo for the
+    suggestion.  (Closes: #917368)
+  * dh_installtmpfiles: New command extracted from
+    dh_installsystem that will handle tmpfiles.d
+    configuration.  Thanks to Michael Biebl for the
+    suggestion.  (Closes: #944478)
+  * dh_installsystemd: In compat 13, this command will no
+    longer manage tmpfiles.d configuration.
+  * dh: Run dh_installtmpfiles by default in compat 13.
+  * Dh_Lib.pm: Emit "error" and "warning" with error and
+    warning messages.  Thanks to Paul Wise for the
+    suggestion.  (Closes: #906723)
+  * Dh_Lib.pm: Support colored output for warnings and
+    errors (enabled by default).  The colors can be
+    controlled by setting DH_COLORS or DPKG_COLORS.  The
+    latter will also affect dpkg-related tools.
+    Note: NO_COLOR is respected in the absence of
+    DH_COLORS and DPKG_COLORS.
+  * Dh_Lib.pm: Support substitution variables in files
+    handled by filearray and filedoublearray in compat 13.
+    This also applies to executable configuration files.
+    As the substitution occurs after splitting the files
+    into tokens, it can be used to include spaces in the
+    tokens (often file names).  (Closes: #198507)
+  * dh_install: Support substitution configuration files.
+  * dh_clean: Ditto.
+  * dh_installcatalogs: Ditto.
+  * dh_installdeb: Ditto (debian/*.maintscripts only).
+  * dh_installdirs: Ditto.
+  * dh_installdocs: Ditto.
+  * dh_installexamples: Ditto.
+  * dh_installinfo: Ditto.
+  * dh_installman: Ditto.
+  * dh_installwm: Ditto.
+  * dh_link: Ditto.
+  * dh_missing: Ditto.
+  * dh_ucf: Ditto.
+  * debian/rules: Remove override for dh_missing as the
+    --fail-missing parameter is default now.
+
+  [ Helmut Grohne ]
+  * Warn about missing perl-xs-dev for perl_* buildsystems.
+
+ -- Niels Thykier <niels@thykier.net>  Sun, 19 Jan 2020 10:02:16 +0000
+
 debhelper (12.7.3~bpo10+1) buster-backports; urgency=medium
 
   * Rebuild for buster-backports.

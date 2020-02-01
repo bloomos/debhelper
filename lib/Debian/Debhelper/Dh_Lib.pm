@@ -202,6 +202,12 @@ our $DEB822_FIELD_REGEX = qr/
 
 our $PARSE_DH_SEQUENCE_INFO = 0;
 
+# We need logging in compat 9 or in override/hook targets (for --remaining-packages to work)
+# - This option is a global toggle to disable logs for special commands (e.g. dh or dh_clean)
+# It is initialized during "init".  This implies that commands that never calls init are
+# not dh_* commands or do not need the log
+my $write_log = undef;
+
 sub init {
 	my %params=@_;
 
@@ -309,17 +315,25 @@ sub init {
 	}
 
 	$dh{U_PARAMS} //= [];
+
+	if ($params{'inhibit_log'}) {
+		$write_log = 0;
+	} else {
+		# Only initialize if unset (i.e. avoid overriding an early call
+		# to inhibit_log()
+		$write_log //= 1;
+	}
 }
 
-# Run at exit. Add the command to the log files for the packages it acted
-# on, if it's exiting successfully.
-my $write_log=1;
+# Ensure the log is written if requested but only if the command was
+# successful.
 sub END {
+	return if $? != 0 or not $write_log;
 	# If there is no 'debian/control', then we are not being run from
 	# a package directory and then the write_log will not do what we
 	# expect.
 	return if not -f 'debian/control';
-	if ($? == 0 && $write_log && (compat(9, 1) || $ENV{DH_INTERNAL_OVERRIDE})) {
+	if (compat(9, 1) || $ENV{DH_INTERNAL_OVERRIDE}) {
 		write_log(basename($0), @{$dh{DOPACKAGES}});
 	}
 }
@@ -330,20 +344,6 @@ sub logfile {
 	return "debian/${ext}debhelper.log"
 }
 
-sub add_override {
-	my $line=shift;
-	$line="override_$ENV{DH_INTERNAL_OVERRIDE} $line"
-		if defined $ENV{DH_INTERNAL_OVERRIDE};
-	return $line;
-}
-
-sub remove_override {
-	my $line=shift;
-	$line=~s/^\Qoverride_$ENV{DH_INTERNAL_OVERRIDE}\E\s+//
-		if defined $ENV{DH_INTERNAL_OVERRIDE};
-	return $line;
-}
-
 sub load_log {
 	my ($package, $db)=@_;
 
@@ -351,7 +351,7 @@ sub load_log {
 	open(LOG, "<", logfile($package)) || return;
 	while (<LOG>) {
 		chomp;
-		my $command=remove_override($_);
+		my $command = $_;
 		push @log, $command;
 		$db->{$package}{$command}=1 if defined $db;
 	}
@@ -366,9 +366,9 @@ sub write_log {
 	return if $dh{NO_ACT};
 
 	foreach my $package (@packages) {
-		my $log=logfile($package);
+		my $log = logfile($package);
 		open(LOG, ">>", $log) || error("failed to write to ${log}: $!");
-		print LOG add_override($cmd)."\n";
+		print LOG $cmd."\n";
 		close LOG;
 	}
 }
@@ -379,8 +379,8 @@ sub commit_override_log {
 	return if $dh{NO_ACT};
 
 	foreach my $package (@packages) {
-		my @log=map { remove_override($_) } load_log($package);
-		my $log=logfile($package);
+		my @log = load_log($package);
+		my $log = logfile($package);
 		open(LOG, ">", $log) || error("failed to write to ${log}: $!");
 		print LOG $_."\n" foreach @log;
 		close LOG;
@@ -767,20 +767,57 @@ sub nonquiet_print {
 	}
 }
 
-# Output an error message and die (can be caught).
-sub error {
-	my ($message) = @_;
-	# ensure the error code is well defined.
-	$! = 255;
-	die basename($0).": $message\n";
-}
+{
+	my $_use_color;
+	sub _color {
+		my ($msg, $color) = @_;
+		if (not defined($_use_color)) {
+			# This part is basically Dpkg::ErrorHandling::setup_color over again
+			# with some tweaks.
+			# (but the module uses Dpkg + Dpkg::Gettext, so it is very expensive
+			# to load)
+			my $mode = $ENV{'DH_COLORS'} // $ENV{'DPKG_COLORS'};
+			# Support NO_COLOR (https://no-color.org/)
+			$mode //= exists($ENV{'NO_COLOR'}) ? 'never' : 'auto';
 
-# Output a warning.
-sub warning {
-	my ($message) = @_;
-	$message //= '';
-	
-	print STDERR basename($0).": $message\n";
+			if ($mode eq 'auto') {
+				$_use_color = 1 if -t *STDOUT or -t *STDERR;
+			} elsif ($mode eq 'always') {
+				$_use_color = 1;
+			} else {
+				$_use_color = 0;
+			}
+
+			eval {
+				require Term::ANSIColor if $_use_color;
+			};
+			if ($@) {
+				# In case of errors, skip colors.
+				$_use_color = 0;
+			}
+		}
+		if ($_use_color) {
+			local $ENV{'NO_COLOR'} = undef;
+			$msg = Term::ANSIColor::colored($msg, $color);
+		}
+		return $msg;
+	}
+
+	# Output an error message and die (can be caught).
+	sub error {
+		my ($message) = @_;
+		# ensure the error code is well defined.
+		$! = 255;
+		die(_color(basename($0), 'bold') . ': ' . _color('error', 'bold red') . ": $message\n");
+	}
+
+	# Output a warning.
+	sub warning {
+		my ($message) = @_;
+		$message //= '';
+
+		print STDERR _color(basename($0), 'bold') . ': ' . _color('warning', 'bold yellow') . ": $message\n";
+	}
 }
 
 # Returns the basename of the argument passed to it.
@@ -978,11 +1015,7 @@ sub default_sourcedir {
 			}
 		}
 		foreach my $file (@try) {
-			if (-f $file &&
-				(! $dh{IGNORE} || ! exists $dh{IGNORE}->{$file})) {
-				return $file;
-			}
-
+			return $file if -f $file;
 		}
 
 		return "";
@@ -1171,7 +1204,7 @@ sub autoscript_sed {
 	my ($sed, $infile, $outfile, $out_fd) = @_;
 	if (not defined($sed) or ref($sed)) {
 		my $out = $out_fd;
-		open(my $in, '<', $infile) or die "$infile: $!";
+		open(my $in, '<', $infile) or error("open $infile failed: $!");
 		if (not defined($out_fd)) {
 			open($out, '>>', $outfile) or error("open($outfile): $!");
 		}
@@ -1186,9 +1219,9 @@ sub autoscript_sed {
 			}
 		}
 		if (not defined($out_fd)) {
-			close($out) or error("close($outfile): $!");
+			close($out) or error("close $outfile failed: $!");
 		}
-		close($in) or die "$infile: $!";
+		close($in) or error("close $infile failed: $!");
 	}
 	else {
 		error("Internal error - passed open handle for legacy method") if defined($out_fd);
@@ -1376,25 +1409,91 @@ sub glob_expand {
 	return @result;
 }
 
+
+my %BUILT_IN_SUBST = (
+	'Space'        => ' ',
+	'Dollar'       => '$',
+	'Newline'      => "\n",
+	'Tab'          => "\b",
+);
+
+sub _variable_substitution {
+	my ($text, $loc) = @_;
+	return $text if index($text, '$') < 0;
+	my $pos = -1;
+	my $subst_count = 0;
+	my $expansion_count = 0;
+	my $current_size = length($text);
+	my $expansion_size_limit = 3 * $current_size;
+	1 while ($text =~ s<
+			\$\{([A-Za-z0-9][-_:0-9A-Za-z]*)\}  # Match ${something} and replace it
+		>[
+			my $match = $1;
+			my $new_pos = pos()//-1;
+			my $value;
+
+			if ($pos == $new_pos) {
+				# Safe-guard in case we ever implement recursive expansion
+				error("Error substituting in ${loc} (at position $pos); recursion limit while expanding \${${match}")
+					if (++$subst_count >= 20);
+			} else {
+				$subst_count = 0;
+				$pos = $new_pos;
+				if (++$expansion_count >= 50) {
+					error("Error substituting in ${loc}; substitution limit of ${expansion_count} reached");
+				}
+			}
+			if (exists($BUILT_IN_SUBST{$match})) {
+				$value = $BUILT_IN_SUBST{$match};
+			} elsif ($match =~ m/^DEB_(?:BUILD|HOST|TARGET)_/) {
+				$value = dpkg_architecture_value($match) //
+					error(qq{Cannot expand "\${${match}}\" in ${loc} as it is not a known dpkg-architecture value});
+			} elsif ($match =~ m/^env:(.+)/) {
+				my $env_var = $1;
+				$value = $ENV{$env_var} //
+					error(qq{Cannot expand "\${${match}}" in ${loc} as the ENV variable "${env_var}" is unset});
+			}
+			error("Cannot resolve variable \${$match} in ${loc}")
+				if not defined($value);
+			# We do not support recursive expansion.
+			$value =~ s/\$/\$\{\}/;
+			$current_size += length($value) - length($match) - 3;
+			if ($current_size > 4096 and $current_size > $expansion_size_limit) {
+				error("Refusing to expand \${${match}} in ${loc} - the original input seems to grow beyond reasonable'
+						 . ' limits!");
+			}
+			$value;
+		]gex);
+	$text =~ s/\$\{\}/\$/g;
+
+	return $text;
+}
+
 # Reads in the specified file, one line at a time. splits on words, 
 # and returns an array of arrays of the contents.
 # If a value is passed in as the second parameter, then glob
 # expansion is done in the directory specified by the parameter ("." is
 # frequently a good choice).
+# In compat 13+, it will do variable expansion (after splitting the lines
+# into words)
 sub filedoublearray {
 	my ($file, $globdir, $error_handler) = @_;
 
 	# executable config files are a v9 thing.
 	my $x=! compat(8) && -x $file;
+	my $expand_patterns = compat(12) ? 0 : 1;
+	my $source;
 	if ($x) {
 		require Cwd;
 		my $cmd=Cwd::abs_path($file);
 		$ENV{"DH_CONFIG_ACT_ON_PACKAGES"} = join(",", @{$dh{"DOPACKAGES"}});
 		open(DH_FARRAY_IN, '-|', $cmd) || error("cannot run $file: $!");
 		delete $ENV{"DH_CONFIG_ACT_ON_PACKAGES"};
+		$source = "output of ./${file}";
 	}
 	else {
 		open (DH_FARRAY_IN, '<', $file) || error("cannot read $file: $!");
+		$source = $file;
 	}
 
 	my @ret;
@@ -1412,10 +1511,14 @@ sub filedoublearray {
 		# We always ignore/permit empty lines
 		next if $_ eq '';
 		my @line;
+		my $source_ref = "${source} (line $.)";
 
 		if (defined($globdir) && ! $x) {
 			if (ref($globdir)) {
 				my @patterns = split;
+				if ($expand_patterns) {
+					@patterns = map {_variable_substitution($_, $source_ref)} @patterns;
+				}
 				push(@line, glob_expand($globdir, $error_handler, @patterns));
 			} else {
 				# Legacy call - Silently discards globs that match nothing.
@@ -1425,12 +1528,18 @@ sub filedoublearray {
 				# filenames that come out are relative to it.
 				foreach (map { glob "$globdir/$_" } split) {
 					s#^$globdir/##;
+					if ($expand_patterns) {
+						$_ = _variable_substitution($_, $source_ref);
+					}
 					push @line, $_;
 				}
 			}
 		}
 		else {
 			@line = split;
+			if ($expand_patterns) {
+				@line = map {_variable_substitution($_, $source_ref)} @line;
+			}
 		}
 		push @ret, [@line];
 	}
@@ -2517,13 +2626,13 @@ sub open_gz {
 	};
 	if ($@) {
 		open($fd, '-|', 'gzip', '-dc', $file)
-		  or die("gzip -dc $file failed: $!");
+		  or error("gzip -dc $file failed: $!");
 	} else {
 		# Pass ":unix" as well due to https://rt.cpan.org/Public/Bug/Display.html?id=114557
 		# Alternatively, we could ensure we always use "POSIX::_exit".  Unfortunately,
 		# loading POSIX is insanely slow.
 		open($fd, '<:unix:gzip', $file)
-		  or die("open $file [<:unix:gzip] failed: $!");
+		  or error("open $file [<:unix:gzip] failed: $!");
 	}
 	return $fd;
 }
