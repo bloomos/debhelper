@@ -14,7 +14,7 @@ use constant {
 	'SEQUENCE_TYPE_BOTH'                       => 'both',
 	'FLAG_OPT_SOURCE_BUILDS_NO_ARCH_PACKAGES'  => 0x1,
 	'FLAG_OPT_SOURCE_BUILDS_NO_INDEP_PACKAGES' => 0x2,
-	'UNSKIPPABLE_CLI_OPTIONS_BUILD_SYSTEM' => q(-S|--buildsystem|-D|--sourcedir(?:ectory)?|-B|--builddir(?:ectory)?),
+	'UNSKIPPABLE_CLI_OPTIONS_BUILD_SYSTEM' => q(-S|--buildsystem|-D|--sourcedir|--sourcedirectory|-B|--builddir|--builddirectory),
 };
 
 use Exporter qw(import);
@@ -608,7 +608,7 @@ sub parse_dh_cmd_options {
 				$max_parallel = get_buildoption('parallel') // 1;
 				next if $max_parallel == 1;
 			}
-			if ($opt =~ m/^(--[^=]++)(?:=.*)?$/ or $opt =~ m/^(-[^-])$/) {
+			if ($opt =~ m/^(--[^=]++)(?:=.*)?$/ or $opt =~ m/^(-[^-])(?:=.*)?$/) {
 				my $optname = $1;
 				if (length($optname) > 2 and (compat(12, 1) or $optname =~ m/^-[^-][^=]/)) {
 					# We cannot optimize bundled options but we can optimize a single
@@ -618,7 +618,12 @@ sub parse_dh_cmd_options {
 					$Debian::Debhelper::DH::SequenceState::unoptimizable_option_bundle = 1
 				}
 				$Debian::Debhelper::DH::SequenceState::seen_options{$optname} = 1;
+			} elsif ($opt =~ m/^-[^-][^-]/) {
+				# We cannot optimize bundled options but we can optimize a single
+				# short option with an explicit parameter (-B=F is ok, -BF is not)
+				$Debian::Debhelper::DH::SequenceState::unoptimizable_option_bundle = 1
 			} else {
+				# Special case that disables NOOP cli-options() as well
 				$Debian::Debhelper::DH::SequenceState::unoptimizable_user_option = 1;
 			}
 			push(@{$options_ref}, "-O" . $opt);
@@ -626,6 +631,7 @@ sub parse_dh_cmd_options {
 			if ($options_ref->[$#{$options_ref}] =~ /^-O--/) {
 				$options_ref->[$#{$options_ref}] .= '=' . $opt;
 			} else {
+				# Special case that disables NOOP cli-options() as well
 				$Debian::Debhelper::DH::SequenceState::unoptimizable_user_option = 1;
 				$options_ref->[$#{$options_ref}] .= $opt;
 			}
@@ -786,6 +792,15 @@ sub _stamp_target {
 				require Debian::Debhelper::Dh_Buildsystems;
 				my $system = Debian::Debhelper::Dh_Buildsystems::load_buildsystem(undef, $need);
 				return 0 if defined($system);
+			} elsif ($type eq 'internal') {
+				if ($need ne 'bug#950723') {
+					warning('Broken internal NOOP hint; should not happen unless someone is using implementation details');
+					error("Unknown internal NOOP type hint in ${command}: ${need}");
+				}
+
+				$all_pkgs //= [ getpackages() ];
+				push(@{$all_pkgs}, map { "${_}@"} getpackages());
+				push(@packages, map { "${_}@"} @packages);
 			} else {
 				# Unknown hint - make no assumptions
 				return 0;

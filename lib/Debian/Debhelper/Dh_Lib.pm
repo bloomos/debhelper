@@ -14,12 +14,12 @@ use constant {
 	'MIN_COMPAT_LEVEL' => 5,
 	# Lowest compat level that does *not* cause deprecation
 	# warnings
-	'LOWEST_NON_DEPRECATED_COMPAT_LEVEL' => 9,
+	'LOWEST_NON_DEPRECATED_COMPAT_LEVEL' => 10,
 	# Lowest compat level to generate "debhelper-compat (= X)"
 	# relations for.
 	'LOWEST_VIRTUAL_DEBHELPER_COMPAT_LEVEL' => 9,
 	# Highest compat level permitted
-	'MAX_COMPAT_LEVEL' => 13,
+	'MAX_COMPAT_LEVEL' => 14,
 	# Magic value for xargs
 	'XARGS_INSERT_PARAMS_HERE' => \'<INSERT-HERE>', #'# Hi emacs.
 	# Magic value for debhelper tools to request "current version"

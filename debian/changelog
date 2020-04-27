@@ -1,3 +1,66 @@
+debhelper (13) unstable; urgency=medium
+
+  [ Niels Thykier ]
+  * debian/changelog: Fix typo of a bug number in the 12.10
+    entry.  Thanks to Andy Caldwell for reporting it.
+  * Dh_Lib.pm: Flag compat 9 as deprecated as announced in
+    https://lists.debian.org/debian-devel-announce/2020/02/msg00000.html
+  * dh_install: Remove trailing slashes from value to the --sourcedir
+    parameter. This avoids dh_install computing an incorrect directory
+    name.  Thanks to Mihai Moldovan for reporting the issue.
+    (Closes: #955568)
+  * dh_missing: Ditto.
+  * SequencerUtil.pm/dh: Fix bug where the long forms of --builddirectory
+    and --sourcedirectory might be ignored by dh causing it to skip
+    dh_auto_* when it should not.  This is in practice only a problem in
+    compat 13 as long form of arguments are not optimized in compat 12 or
+    earlier.
+
+  [ Chris Leick ]
+  * debhelper.pod: Fix typos.
+  * dh_makeshlibs: Ditto.
+  * dh: Ditto.
+
+  [ Helmut Grohne ]
+  * perl_makemaker.pm: Add missing import of "warning" function.
+
+ -- Niels Thykier <niels@thykier.net>  Wed, 15 Apr 2020 14:44:56 +0000
+
+debhelper (12.10) unstable; urgency=medium
+
+  [ Niels Thykier ]
+  * dh_installsystemd.1: Improve documentation about tmpfiles that
+    are now handled by dh_installtmpfiles in compat 13.
+  * dh_installtmpfiles: Prefer debian/package.tmpfiles over
+    debian/package.tmpfile, but accept the old path with a warning.
+    Thanks to Michael Biebl for suggesting the change.
+  * dh_strip: Automatically strip Link-Time Optimization (LTO)
+    symbols from static archives.  The format is not stable between
+    compiler versions.  Thanks to Matthias Klose for the
+    suggestion and for providing the exact options.
+    (Closes: #939656)
+  * dh: Tweak the command-skipping optimization to skip commands
+    in a few more cases when the command is known not to react to
+    command line options.
+  * dh,dh_installsytemd*: Work around broken NOOP promise caused by
+    dh_installsystemd* using nonstandard "package@" prefix for
+    pkgfiles.  Thanks to Badreddin Aboubakr and Andy Caldwell for
+    reporting it.  (Closes: #950723, #951820)
+
+  [ Nicholas Guriev ]
+  * cmake: Verbose autogen rules.
+  * cmake: Skip install all dependency with compatibility level 13 and
+    above.
+
+  [ Andy Caldwell ]
+  * dh_installsystemduser: Fix bug that prevented dh_installsystemduser
+    from installing parameterized services.  (Closes: #951819)
+
+  [ Translations ]
+  * Update German translation (Chris Leick)  (Closes: #951917)
+
+ -- Niels Thykier <niels@thykier.net>  Tue, 24 Mar 2020 15:55:09 +0000
+
 debhelper (12.9~bpo10+1) buster-backports; urgency=medium
 
   * Rebuild for buster-backports.
