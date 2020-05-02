@@ -1445,6 +1445,46 @@ my %BUILT_IN_SUBST = (
 	'Tab'          => "\t",
 );
 
+my %EXTERNAL_SUBST_VARS;
+
+sub _load_external_variables {
+	my ($provider_name, $varname, $loc) = @_;
+	state %loaded_providers;
+	if (exists($loaded_providers{$provider_name})) {
+		return $loaded_providers{$provider_name} ||
+			error("Loading ${provider_name} implicitly depends on itself (\${${varname}} seen in $loc)");
+	}
+	for my $dir (@DATA_INC_PATH) {
+		my $path = "${dir}/extension-snippets/${provider_name}.config-subst";
+		if (-f $path) {
+			$loaded_providers{$provider_name} = 0;
+			open(my $fd, '<', $path)
+				or error("open(${path}) failed: $! (when trying to resolve \${${varname} from $loc)");
+			while (defined(my $line = <$fd>)) {
+				my ($k, $v);
+				chomp($line);
+				# We allow comments and empty lines
+				next if $line =~ m/^\s*(?:#.*)?$/;
+				($k, $v) = split(qr/\s*=\s*/, $line, 2);
+				if ($k !~ m{^\Q${provider_name}\E:}) {
+					warning("Cannot expand \${${varname}} in ${loc} due to bug in the file providing the variable.");
+					error("Error in ${path}: All variables must start with \"${provider_name}:\"");
+				}
+				if (defined($EXTERNAL_SUBST_VARS{$k})) {
+					warning("Cannot expand \${${varname}} in ${loc} due to bug in the file providing the variable.");
+					error("Error in ${path}: The variable \"${k}\" is defined twice");
+				}
+				$EXTERNAL_SUBST_VARS{$k} = _variable_substitution($v,
+					"$path (when trying to resolve \${${varname} from $loc)");
+			}
+			close($fd);
+			$loaded_providers{$provider_name} = 1;
+			return;
+		}
+	}
+	error("Cannot expand \${${varname}}; nothing provides that variable (check for typos and missing a Build-Depends)");
+}
+
 sub _variable_substitution {
 	my ($text, $loc, $subst_params) = @_;
 	return $text if index($text, '$') < 0;
@@ -1494,6 +1534,18 @@ sub _variable_substitution {
 				my $env_var = $1;
 				$value = $ENV{$env_var} //
 					error(qq{Cannot expand "\${${match}}" in ${loc} as the ENV variable "${env_var}" is unset});
+			} elsif ($match =~ m{^ext:((${PKGNAME_REGEX}):.+)$}o) {
+				my ($full_key, $provider_name) = ($1, $2);
+				# Note: This "lookup -> load -> lookup" pattern implements the ability for a provider
+				# to use variables from their own file as a part of the definition for the next variable.
+				# Without this, _load_external_variables would simply bail on "recursive definition".
+				$value = $EXTERNAL_SUBST_VARS{$full_key};
+				if (not defined($value)) {
+					_load_external_variables($provider_name, $match, $loc);
+					$value = $EXTERNAL_SUBST_VARS{$full_key} //
+						error(qq{Cannot expand "\${${match}}" in ${loc}: the variable is not available in the}
+					     . " namespace ${provider_name}");
+				}
 			}
 			error(qq{Cannot resolve variable "\${$match}" in ${loc}})
 				if not defined($value);

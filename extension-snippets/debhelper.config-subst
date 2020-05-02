@@ -1,0 +1,1 @@
+debhelper:datafiles_dir=/usr/share/debhelper

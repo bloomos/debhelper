@@ -1,2 +1,2 @@
-usr/share/debhelper
+usr/share/debhelper ${ext:debhelper:datafiles_dir}
 usr/share/perl5
