@@ -830,6 +830,32 @@ sub _color {
 	return $msg;
 }
 
+
+sub _fancy_formatting {
+	my ($message, $fh) = @_;
+	my @layers = PerlIO::get_layers($fh);
+	my $utf8_ok = 0;
+	for my $l (@layers) {
+		if ($l eq 'utf8' || $l eq 'encoding(utf-8-strict)') {
+			$utf8_ok = 1;
+			last;
+		}
+	}
+	return $message if not $utf8_ok;
+	$message =~ s{[/][!][\\]}{⚠}g;  # ⚠
+	$message =~ s{[.][/]}{✓}g;  # ✓
+	return $message;
+}
+
+sub _format_message {
+	my ($prefix, $message, $fh) = @_;
+	my @parts = split(m/\r?\n/, _fancy_formatting($message, $fh));
+	my $first_line = join(': ', $prefix, $parts[0]);
+	return "$first_line\n" if scalar(@parts) == 1;
+	return join("\n", $first_line,
+				map { join('- ', $prefix, $_); } @parts[1..$#parts]) . "\n";
+}
+
 # Output an error message and die (can be caught).
 sub error {
 	my ($message) = @_;
@@ -841,9 +867,11 @@ sub error {
 # Output a warning.
 sub warning {
 	my ($message) = @_;
+	my $prefix = _color(basename($0), 'bold') . ': ' . _color('warning', 'bold yellow');
 	$message //= '';
 
-	print STDERR _color(basename($0), 'bold') . ': ' . _color('warning', 'bold yellow') . ": $message\n";
+	# print STDERR _color(basename($0), 'bold') . ': ' . _color('warning', 'bold yellow') . ": $message\n";
+	print STDERR _format_message($prefix, $message, \*STDERR);
 }
 
 # Returns the basename of the argument passed to it.
