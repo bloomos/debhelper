@@ -1466,6 +1466,8 @@ sub _load_external_variables {
 				chomp($line);
 				# We allow comments and empty lines
 				next if $line =~ m/^\s*(?:#.*)?$/;
+				$line =~ s/^\s++//;
+				$line =~ s/\s++$//;
 				($k, $v) = split(qr/\s*=\s*/, $line, 2);
 				if ($k !~ m{^\Q${provider_name}\E:}) {
 					warning("Cannot expand \${${varname}} in ${loc} due to bug in the file providing the variable.");
