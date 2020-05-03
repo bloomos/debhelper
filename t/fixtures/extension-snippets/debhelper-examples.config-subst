@@ -1,0 +1,19 @@
+# Example file for show-casing the feature
+
+# "short-hand" for /usr/lib/${DEB_HOST_MULTIARCH}
+# Use as: ${ext:debhelper-examples:lib-ma-dir}
+debhelper-examples:lib-ma-dir=/usr/lib/${DEB_HOST_MULTIARCH}
+
+# We can depend on previously defined variables in the same file
+# Note: we have to use the full ${ext:debhelper-examples:...} syntax
+debhelper-examples:foo-plugin-dir=${ext:debhelper-examples:lib-ma-dir}/foo/plugins
+
+# We can also make package specific variables
+debhelper-examples:pkg-lib-dir=${ext:debhelper-examples:lib-ma-dir}/${package}
+
+# And variables that depend on package specific variables
+debhelper-examples:pkg-plugin-dir=${ext:debhelper-examples:pkg-lib-dir}/plugins
+
+# And variables that depend on variables that are package specific variables
+# (I think you get the point, but it is useful for testing)
+debhelper-examples:pkg-plugin-baz-dir=${ext:debhelper-examples:pkg-plugin-dir}/baz

@@ -1448,7 +1448,8 @@ my %BUILT_IN_SUBST = (
 my %EXTERNAL_SUBST_VARS;
 
 sub _load_external_variables {
-	my ($provider_name, $varname, $loc) = @_;
+	my ($provider_name, $varname, $loc, $subst_params) = @_;
+	my @pkg_specific_vars;
 	state %loaded_providers;
 	if (exists($loaded_providers{$provider_name})) {
 		return $loaded_providers{$provider_name} ||
@@ -1470,12 +1471,35 @@ sub _load_external_variables {
 					warning("Cannot expand \${${varname}} in ${loc} due to bug in the file providing the variable.");
 					error("Error in ${path}: All variables must start with \"${provider_name}:\"");
 				}
-				if (defined($EXTERNAL_SUBST_VARS{$k})) {
+				if (defined($EXTERNAL_SUBST_VARS{$k}{'_template'})) {
 					warning("Cannot expand \${${varname}} in ${loc} due to bug in the file providing the variable.");
 					error("Error in ${path}: The variable \"${k}\" is defined twice");
 				}
-				$EXTERNAL_SUBST_VARS{$k} = _variable_substitution($v,
-					"$path (when trying to resolve \${${varname} from $loc)");
+				my $is_package_specific = index($v, '${package}') >= 0 ? 1 : 0;
+				my $value = $v;
+				if (not $is_package_specific) {
+					# Not directly package specific, but it might if it depends one that is declared package specific
+					for my $pk (@pkg_specific_vars) {
+						if (index($value, $pk) > -1) {
+							$is_package_specific = 1;
+							last;
+						}
+					}
+
+					if (not $is_package_specific) {
+						$value = _variable_substitution($v, "$path (when trying to resolve \${${varname}} from $loc)",
+							$subst_params);
+					}
+				}
+				if ($is_package_specific) {
+					# Flag it as package specific so we do not make it
+					push(@pkg_specific_vars, $k);
+				}
+				$EXTERNAL_SUBST_VARS{$k}{'_template'} = {
+					'is_package_specific' => $is_package_specific,
+					'value'               => $value,
+					'path'                => $path,
+				};
 			}
 			close($fd);
 			$loaded_providers{$provider_name} = 1;
@@ -1485,6 +1509,18 @@ sub _load_external_variables {
 	error("Cannot expand \${${varname}}; nothing provides that variable (check for typos and missing a Build-Depends)");
 }
 
+sub _var_subst_error_no_package {
+	my ($subst_param, $match, $loc, $is_resolving_external) = @_;
+	if (not $subst_param) {
+		warning("This tool did not provide the package context for variable substitution; it may need an update.");
+	};
+	if ($is_resolving_external) {
+		warning(qq{The variable "\${${match}}" is only valid in a "per-package" context});
+	}
+	error(qq{Cannot expand "\${${match}}" in ${loc}: Substitution is not in the context of a particular}
+        . ' package');
+}
+
 sub _variable_substitution {
 	my ($text, $loc, $subst_params) = @_;
 	return $text if index($text, '$') < 0;
@@ -1492,9 +1528,12 @@ sub _variable_substitution {
 	my $subst_count = 0;
 	my $expansion_count = 0;
 	my $current_size = length($text);
+	my $package;
 	my $expansion_size_limit = _VAR_SUBST_EXPANSION_DYNAMIC_EXPANSION_FACTOR_LIMIT * $current_size;
 	$expansion_size_limit = _VAR_SUBST_EXPANSION_MIN_SUPPORTED_SIZE_LIMIT
 		if $expansion_size_limit < _VAR_SUBST_EXPANSION_MIN_SUPPORTED_SIZE_LIMIT;
+
+	$package = $subst_params->{'package'} if $subst_params and exists($subst_params->{'package'});
 	1 while ($text =~ s<
 			\$\{([A-Za-z0-9][-_:0-9A-Za-z]*)\}  # Match ${something} and replace it
 		>[
@@ -1518,15 +1557,7 @@ sub _variable_substitution {
 			} elsif ($match eq 'source') {
 				$value = sourcepackage();
 			} elsif ($match eq 'package') {
-				if ($subst_params and not exists($subst_params->{'package'})) {
-					error(qq{Cannot expand "\${${match}}" in ${loc}: Substitution is not in the context of a particular}
-					  . ' package');
-				}
-				$value = $subst_params->{'package'} if $subst_params;
-				if (not defined($value)) {
-					warning("This tool did not provide the \${package} variable; it may need an update.");
-					error(qq{Cannot expand "\${${match}}" in ${loc} as the concrete package name is not provided});
-				}
+				$value = $package // _var_subst_error_no_package($subst_params, $match, $loc, 0);
 			} elsif ($match =~ m/^DEB_(?:BUILD|HOST|TARGET)_/) {
 				$value = dpkg_architecture_value($match) //
 					error(qq{Cannot expand "\${${match}}" in ${loc} as it is not a known dpkg-architecture value});
@@ -1539,12 +1570,30 @@ sub _variable_substitution {
 				# Note: This "lookup -> load -> lookup" pattern implements the ability for a provider
 				# to use variables from their own file as a part of the definition for the next variable.
 				# Without this, _load_external_variables would simply bail on "recursive definition".
-				$value = $EXTERNAL_SUBST_VARS{$full_key};
-				if (not defined($value)) {
+				my $template = $EXTERNAL_SUBST_VARS{$full_key}{'_template'};
+				if (not defined($template)) {
 					_load_external_variables($provider_name, $match, $loc);
-					$value = $EXTERNAL_SUBST_VARS{$full_key} //
+					$template = $EXTERNAL_SUBST_VARS{$full_key}{'_template'} //
 						error(qq{Cannot expand "\${${match}}" in ${loc}: the variable is not available in the}
 					     . " namespace ${provider_name}");
+				}
+
+				if (not $template->{'is_package_specific'}) {
+					# Trivial case
+					$value = $template->{'value'};
+				} else {
+					 _var_subst_error_no_package($subst_params, $match, $loc, 0)
+						 if not defined($package);
+					# Maybe (unlikely), we expanded it before.
+					$value = $EXTERNAL_SUBST_VARS{$full_key}{$package};
+					if (not defined($value)) {
+						# Resolve it now.
+						my $path = $template->{'path'};
+						my $v = $template->{'value'};
+						$value = _variable_substitution($v, "$path (when trying to resolve \${${match}} from $loc)",
+								$subst_params);
+						$EXTERNAL_SUBST_VARS{$full_key}{$package} = $value;
+					}
 				}
 			}
 			error(qq{Cannot resolve variable "\${$match}" in ${loc}})

@@ -62,6 +62,54 @@ my @SUBST_TEST_OK = (
 		'/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH') . '/debhelper',
 		{'package' => 'foo'}
 	],
+
+	# Externally provided variables
+	[
+		'${ext:debhelper-examples:lib-ma-dir}',
+		'/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH'),
+	],
+	[
+		'${ext:debhelper-examples:lib-ma-dir}',
+		'/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH'),
+	],
+	[
+		'${ext:debhelper-examples:foo-plugin-dir}',
+		'/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH') . '/foo/plugins',
+	],
+
+	# Externally provided package specific variables (for package foo)
+	[
+		'${ext:debhelper-examples:pkg-lib-dir}',
+		'/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH') . '/foo',
+		{'package' => 'foo'},
+	],
+	[
+		'${ext:debhelper-examples:pkg-plugin-dir}',
+		'/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH') . '/foo/plugins',
+		{'package' => 'foo'},
+	],
+	[
+		'${ext:debhelper-examples:pkg-plugin-baz-dir}',
+		'/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH') . '/foo/plugins/baz',
+		{'package' => 'foo'},
+	],
+	# Externally provided package specific variables (for package bar)
+	[
+		'${ext:debhelper-examples:pkg-lib-dir}',
+		'/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH') . '/bar',
+		{'package' => 'bar'},
+	],
+	[
+		'${ext:debhelper-examples:pkg-plugin-dir}',
+		'/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH') . '/bar/plugins',
+		{'package' => 'bar'},
+	],
+	[
+		'${ext:debhelper-examples:pkg-plugin-baz-dir}',
+		'/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH') . '/bar/plugins/baz',
+		{'package' => 'bar'},
+	],
+
 );
 
 each_compat_subtest {
