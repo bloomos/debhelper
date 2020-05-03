@@ -1446,7 +1446,7 @@ my %BUILT_IN_SUBST = (
 );
 
 sub _variable_substitution {
-	my ($text, $loc) = @_;
+	my ($text, $loc, $subst_params) = @_;
 	return $text if index($text, '$') < 0;
 	my $pos = -1;
 	my $subst_count = 0;
@@ -1475,6 +1475,18 @@ sub _variable_substitution {
 			}
 			if (exists($BUILT_IN_SUBST{$match})) {
 				$value = $BUILT_IN_SUBST{$match};
+			} elsif ($match eq 'source') {
+				$value = sourcepackage();
+			} elsif ($match eq 'package') {
+				if ($subst_params and not exists($subst_params->{'package'})) {
+					error(qq{Cannot expand "\${${match}}" in ${loc}: Substitution is not in the context of a particular}
+					  . ' package');
+				}
+				$value = $subst_params->{'package'} if $subst_params;
+				if (not defined($value)) {
+					warning("This tool did not provide the \${package} variable; it may need an update.");
+					error(qq{Cannot expand "\${${match}}" in ${loc} as the concrete package name is not provided});
+				}
 			} elsif ($match =~ m/^DEB_(?:BUILD|HOST|TARGET)_/) {
 				$value = dpkg_architecture_value($match) //
 					error(qq{Cannot expand "\${${match}}" in ${loc} as it is not a known dpkg-architecture value});
@@ -1508,6 +1520,17 @@ sub _variable_substitution {
 # into words)
 sub filedoublearray {
 	my ($file, $globdir, $error_handler) = @_;
+	my $substs_params;
+	if (ref($file) eq 'HASH') {
+		my $params = $file;
+		$substs_params = {};
+		error("Bad call to filedoublearray/filearray: When passing a hashref, it must the only parameter")
+			if scalar(@_) >= 2;
+		$file = $params->{'filename'};
+		$globdir = $params->{'glob_dirs'};
+		$error_handler = $params->{'glob_errorhandler'};
+		$substs_params->{'package'} = $params->{'package'} if exists($params->{'package'});
+	}
 
 	# executable config files are a v9 thing.
 	my $x=! compat(8) && -x $file;
@@ -1547,7 +1570,7 @@ sub filedoublearray {
 			if (ref($globdir)) {
 				my @patterns = split;
 				if ($expand_patterns) {
-					@patterns = map {_variable_substitution($_, $source_ref)} @patterns;
+					@patterns = map {_variable_substitution($_, $source_ref, $substs_params)} @patterns;
 				}
 				push(@line, glob_expand($globdir, $error_handler, @patterns));
 			} else {
@@ -1559,7 +1582,7 @@ sub filedoublearray {
 				foreach (map { glob "$globdir/$_" } split) {
 					s#^$globdir/##;
 					if ($expand_patterns) {
-						$_ = _variable_substitution($_, $source_ref);
+						$_ = _variable_substitution($_, $source_ref, $substs_params);
 					}
 					push @line, $_;
 				}
@@ -1568,7 +1591,7 @@ sub filedoublearray {
 		else {
 			@line = split;
 			if ($expand_patterns) {
-				@line = map {_variable_substitution($_, $source_ref)} @line;
+				@line = map {_variable_substitution($_, $source_ref, $substs_params)} @line;
 			}
 		}
 		push @ret, [@line];

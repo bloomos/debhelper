@@ -36,6 +36,29 @@ debhelper (13.0.1) UNRELEASED; urgency=medium
     dh_installchangelogs uses as guesses for finding an upstream
     changelog file.  Thanks to Laurent Bigonville for suggesting
     the change.  (Closes: #933224)
+  * Dh_Lib.pm: Add support for the substitution variables
+    ${source} and ${package} in files handled by filearray and
+    filedoublearray (compat 13 or later).
+    - Note that support for ${package} requires that the helper tool
+      explicitly provides the package name to filearray or
+      filedoublearray and not every tool can do that.  As an example,
+      dh_clean and dh_missing do not support this variable as they do
+      not operate on "per package" files (but "source" files).
+  * dh_install: Add support for ${package} and ${source} substitutions
+    in configuration files.
+  * dh_installcatalogs: Ditto.
+  * dh_installdeb: Ditto (debian/*.maintscripts only).
+  * dh_installdirs: Ditto.
+  * dh_installdocs: Ditto.
+  * dh_installexamples: Ditto.
+  * dh_installinfo: Ditto.
+  * dh_installman: Ditto.
+  * dh_installwm: Ditto.
+  * dh_link: Ditto.
+  * dh_ucf: Ditto.
+  * dh_clean: Add support for ${source} substitutions in configuration
+    files.
+  * dh_missing: Ditto.
 
   [ Translations ]
   * Fix typo in German translation.  (Andreas Bombe)

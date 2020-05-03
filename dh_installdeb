@@ -250,8 +250,12 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 	
 	my $maintscriptfile=pkgfile($package, "maintscript");
 	if ($maintscriptfile) {
+		my $fda_params = {
+			'filename' => $maintscriptfile,
+			'package'  => $package,
+		};
 		if (compat(9)) {
-			foreach my $line (filedoublearray($maintscriptfile)) {
+			foreach my $line (filedoublearray($fda_params)) {
 				my $cmd=$line->[0];
 				error("unknown dpkg-maintscript-helper command: $cmd")
 					unless exists $maintscript_predeps{$cmd};
@@ -265,7 +269,7 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 				}
 			}
 		} else {
-			my @maintscripts = filedoublearray($maintscriptfile);
+			my @maintscripts = filedoublearray($fda_params);
 			my @params;
 			foreach my $line (@maintscripts) {
 				my $cmd=$line->[0];

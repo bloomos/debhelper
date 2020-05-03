@@ -115,7 +115,10 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 
 	my @links;
 	if ($file) {
-		@links=filearray($file);
+		@links = filearray({
+			'package'   => $package,
+			'filename'  => $file,
+		});
 	}
 
 	# Make sure it has pairs of symlinks and destinations. If it

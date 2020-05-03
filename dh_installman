@@ -167,7 +167,12 @@ on_items_in_parallel(\@all_packages, sub {
 		my $error_handler = $skip_install ? \&glob_expand_error_handler_silently_ignore : $default_error_handler;
 		@search_dirs = ($dh{SOURCEDIR} // '.', default_sourcedir($package)) if not compat(10);
 
-		@manpages = filearray($file, \@search_dirs, $error_handler) if $file;
+		@manpages = filearray({
+			'package'   => $package,
+			'filename'  => $file,
+			'glob_dirs' => \@search_dirs,
+			'glob_errorhandler' => $error_handler,
+		}) if $file;
 
 		if (($package eq $dh{FIRSTPACKAGE} || $dh{PARAMS_ALL}) && @ARGV) {
 			push @manpages, @ARGV;

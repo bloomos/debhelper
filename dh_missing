@@ -148,7 +148,10 @@ for my $file (glob('debian/.debhelper/generated/*/installed-by-*')) {
 
 my @missing;
 if ( -f 'debian/not-installed') {
-	my @not_installed = filearray('debian/not-installed');
+	my @not_installed = filearray({
+			'package'  => undef,  # There is no package as context for this call.
+			'filename' => 'debian/not-installed',
+	});
 	for my $pattern (@not_installed) {
 		my @matches;
 		# Add an explicit d/tmp if absent as there is no point in
