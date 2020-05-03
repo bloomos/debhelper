@@ -163,7 +163,11 @@ foreach my $package (getpackages()) {
 
 	my @install;
 	if ($file) {
-		@install=filedoublearray($file); # no globbing here; done below
+		# no globbing here; done below
+		@install = filedoublearray({
+			'filename' => $file,
+			'package'  => $package,
+		});
 	}
 
 

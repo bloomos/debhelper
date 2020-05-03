@@ -52,12 +52,22 @@ my @SUBST_TEST_OK = (
 	['Hello ${env:FOO}', 'Hello test'],
 	['${Dollar}{Space}${}{Space}', '${Space}${Space}'],  # We promise that ${Dollar}/${} never cause recursion
 	['/usr/lib/${DEB_HOST_MULTIARCH}', '/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH')],
+	[
+		'/usr/lib/${DEB_HOST_MULTIARCH}/${package}',
+		'/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH') . '/foo',
+		{'package' => 'foo'}
+	],
+	[
+		'/usr/lib/${DEB_HOST_MULTIARCH}/${source}',
+		'/usr/lib/' . dpkg_architecture_value('DEB_HOST_MULTIARCH') . '/debhelper',
+		{'package' => 'foo'}
+	],
 );
 
 each_compat_subtest {
 	for my $test (@SUBST_TEST_OK) {
-		my ($input, $expected_output) = @{$test};
-		my $actual_output = Debian::Debhelper::Dh_Lib::_variable_substitution($input, 'test');
+		my ($input, $expected_output, $params) = @{$test};
+		my $actual_output = Debian::Debhelper::Dh_Lib::_variable_substitution($input, 'test', $params);
 		is($actual_output, $expected_output, qq{${input}" => "${actual_output}" (should be: "${expected_output})"});
 	}
 };

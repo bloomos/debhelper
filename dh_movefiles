@@ -102,7 +102,11 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 
 	# debian/files has a different purpose, so ignore it.
 	if ($files && $files ne "debian/files" ) {
-		@tomove=filearray($files, $sourcedir);
+		@tomove = filearray({
+			'package'   => $package,
+			'filename'  => $files,
+			'glob_dirs' => $sourcedir, # Legacy call
+		});
 	}
 	
 	if (($package eq $dh{FIRSTPACKAGE} || $dh{PARAMS_ALL}) && @ARGV) {

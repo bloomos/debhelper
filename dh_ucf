@@ -77,7 +77,10 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 
 	my @ucf;
 	if ($file) {
-		@ucf=filedoublearray($file);
+		@ucf = filedoublearray({
+			'package'  => $package,
+			'filename' => $file,
+		});
 	}
 
 	if (($package eq $dh{FIRSTPACKAGE} || $dh{PARAMS_ALL}) && @ARGV) {

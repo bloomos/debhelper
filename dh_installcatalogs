@@ -84,7 +84,11 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 		error("extra command-line arguments");
 	}
 	if ($sgmlcatlistfile) {
-		foreach my $line (filedoublearray($sgmlcatlistfile)) {
+		my $fda_params = {
+			'filename' => $sgmlcatlistfile,
+			'package'  => $package,
+		};
+		foreach my $line (filedoublearray($fda_params)) {
 			my $source = $line->[0];
 			my $dest = $line->[1];
 			my $fulldest = "$tmpdir/$dest";

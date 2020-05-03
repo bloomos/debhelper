@@ -144,9 +144,14 @@ if (! $dh{D_FLAG}) {
 		if (!compat(6) && -e "debian/clean") {
 			my @clean=grep {
 				! excludefile($_)
-			# Silently ignore missing files - for all we know, dh_clean is run before
-			# they have been created.
-			} filearray('debian/clean', ["."], \&glob_expand_error_handler_silently_ignore);
+			} filearray({
+				'package'           => undef,
+				'filename'          => 'debian/clean',
+				'glob_dirs'         => ['.'],
+				# Silently ignore missing files - for all we know, dh_clean is run before
+				# they have been created.
+				'glob_errorhandler' => &glob_expand_error_handler_silently_ignore,
+			});
 			push(@clean_files, grep { !m@/$@ } @clean);
 			push(@clean_dirs, grep { m@/$@ } @clean);
 		}

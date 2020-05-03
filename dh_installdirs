@@ -96,7 +96,10 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 	my @dirs;
 
 	if ($file) {
-		@dirs=filearray($file)
+		@dirs = filearray({
+			'package'   => $package,
+			'filename'  => $file,
+		});
 	}
 
 	if (($package eq $dh{FIRSTPACKAGE} || $dh{PARAMS_ALL}) && @ARGV) {

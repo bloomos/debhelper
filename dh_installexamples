@@ -131,7 +131,12 @@ foreach my $package (getpackages()) {
 	my @examples;
 	
 	if ($file) {
-		@examples = filearray($file, \@search_dirs, $error_handler) if $file;
+		@examples = filearray({
+			'package'   => $package,
+			'filename'  => $file,
+			'glob_dirs' => \@search_dirs,
+			'glob_errorhandler' => $error_handler,
+		}) if $file;
 	}	
 
 	if (($package eq $dh{FIRSTPACKAGE} || $dh{PARAMS_ALL}) && @ARGV) {

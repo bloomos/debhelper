@@ -97,7 +97,11 @@ foreach my $package (@{$dh{DOPACKAGES}}) {
 
 	my @wm;
 	if ($file) {
-		@wm=filearray($file, '.');
+		@wm = filearray({
+			'package'   => $package,
+			'filename'  => $file,
+			'glob_dirs' => '.',  # Legacy call
+		});
 	}
 
 	if (($package eq $dh{FIRSTPACKAGE} || $dh{PARAMS_ALL}) && @ARGV) {
