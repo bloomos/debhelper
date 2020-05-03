@@ -1462,22 +1462,40 @@ sub _load_external_variables {
 			open(my $fd, '<', $path)
 				or error("open(${path}) failed: $! (when trying to resolve \${${varname} from $loc)");
 			while (defined(my $line = <$fd>)) {
-				my ($k, $v);
+				my ($cond, $k, $v, $raw_cond, $existing_template, $cond_explicit);
+				my $is_package_specific = 0;
 				chomp($line);
 				# We allow comments and empty lines
 				next if $line =~ m/^\s*(?:#.*)?$/;
 				$line =~ s/^\s++//;
 				$line =~ s/\s++$//;
+				if ($line =~ s{^[[]([^]]+)[]]\s*}{}) {
+					$raw_cond = $1;
+					$cond_explicit = 1;
+				}
 				($k, $v) = split(qr/\s*=\s*/, $line, 2);
 				if ($k !~ m{^\Q${provider_name}\E:}) {
 					warning("Cannot expand \${${varname}} in ${loc} due to bug in the file providing the variable.");
 					error("Error in ${path}: All variables must start with \"${provider_name}:\"");
 				}
-				if (defined($EXTERNAL_SUBST_VARS{$k}{'_template'})) {
-					warning("Cannot expand \${${varname}} in ${loc} due to bug in the file providing the variable.");
-					error("Error in ${path}: The variable \"${k}\" is defined twice");
+				if (defined($raw_cond)) {
+					if ($raw_cond =~ m{^\s*arch\s*([!]?=)\s*(\S+)\s*$}) {
+						my ($op, $cond_value) = ($1, $2);
+						$is_package_specific = 1;
+						$cond = $op eq '=' ? sub {
+							return package_binary_arch($_[0]->{'package'}) eq $cond_value;
+						} : sub {
+							return package_binary_arch($_[0]->{'package'}) ne $cond_value;
+						};
+					} elsif ($raw_cond =~ m/^\s*default\s*$/) {
+						# Nothing
+					} else {
+						warning("Cannot expand \${${varname}} in ${loc} due to bug in the file providing the variable.");
+						error("Error in ${path}: Unsupported conditional for \"${k}\": ${raw_cond}");
+					}
 				}
-				my $is_package_specific = index($v, '${package}') >= 0 ? 1 : 0;
+
+				$is_package_specific ||= index($v, '${package}') >= 0 ? 1 : 0;
 				my $value = $v;
 				if (not $is_package_specific) {
 					# Not directly package specific, but it might if it depends one that is declared package specific
@@ -1487,21 +1505,42 @@ sub _load_external_variables {
 							last;
 						}
 					}
-
-					if (not $is_package_specific) {
-						$value = _variable_substitution($v, "$path (when trying to resolve \${${varname}} from $loc)",
-							$subst_params);
+				}
+				$existing_template = $EXTERNAL_SUBST_VARS{$k}{'_template'};
+				if (defined($existing_template)) {
+					my $existing_cond = $existing_template->{'conditions'};
+					if (not defined($existing_cond->[-1])) {
+						warning("Cannot expand \${${varname}} in ${loc} due to bug in the file providing the variable.");
+						if (scalar($existing_cond->@*) == 1 and not $cond) {
+							error("Error in ${path}: The variable \"${k}\" is defined twice");
+						}
+						error("Error in ${path}: Conditional definition of variable \"${k}\" must come before"
+						 . ' default declaration');
+					} elsif (not $cond_explicit) {
+						warning("Cannot expand \${${varname}} in ${loc} due to bug in the file providing the variable.");
+						error("Error in ${path}: \"${k}\" is conditional; all definitions must include a [...] prefix"
+						  . ' (if you want the last definition as a fallback, then use "[default]" as condition)');
 					}
+					$is_package_specific ||= $existing_template->{'is_package_specific'};
+				} else {
+					$existing_template = $EXTERNAL_SUBST_VARS{$k}{'_template'} = {
+						'is_package_specific' => 0,
+						'values'              => [],
+						'conditions'          => [],
+						'path'                => $path,
+					};
 				}
 				if ($is_package_specific) {
 					# Flag it as package specific so we do not make it
-					push(@pkg_specific_vars, $k);
+					push(@pkg_specific_vars, $k) if not $existing_template->{'is_package_specific'};
+					$existing_template->{'is_package_specific'} = 1;
 				}
-				$EXTERNAL_SUBST_VARS{$k}{'_template'} = {
-					'is_package_specific' => $is_package_specific,
-					'value'               => $value,
-					'path'                => $path,
-				};
+				if (not $is_package_specific) {
+					$value = _variable_substitution($v, "$path (when trying to resolve \${${varname}} from $loc)",
+						$subst_params);
+				}
+				push($existing_template->{'values'}->@*, $value);
+				push($existing_template->{'conditions'}->@*, $cond);
 			}
 			close($fd);
 			$loaded_providers{$provider_name} = 1;
@@ -1580,9 +1619,9 @@ sub _variable_substitution {
 					     . " namespace ${provider_name}");
 				}
 
-				if (not $template->{'is_package_specific'}) {
+				if (not $template->{'is_package_specific'} and not defined($template->{'conditions'}[0])) {
 					# Trivial case
-					$value = $template->{'value'};
+					$value = $template->{'values'}[0];
 				} else {
 					 _var_subst_error_no_package($subst_params, $match, $loc, 0)
 						 if not defined($package);
@@ -1591,7 +1630,20 @@ sub _variable_substitution {
 					if (not defined($value)) {
 						# Resolve it now.
 						my $path = $template->{'path'};
-						my $v = $template->{'value'};
+						my $values = $template->{'values'};
+						my $v;
+						my $conds = $template->{'conditions'};
+						my $count = $#{$conds};
+						for my $i (0..$count) {
+							if (not defined($conds->[$i]) or $conds->[$i]($subst_params)) {
+								$v = $values->[$i];
+								last;
+							}
+						}
+						if (not defined($v)) {
+							error(qq{Cannot expand "\${${match}}" in ${loc}: the variable definition is conditional }
+							 . ' and none of the definitions were valid in this context');
+						}
 						$value = _variable_substitution($v, "$path (when trying to resolve \${${match}} from $loc)",
 								$subst_params);
 						$EXTERNAL_SUBST_VARS{$full_key}{$package} = $value;

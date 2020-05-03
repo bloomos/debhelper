@@ -17,3 +17,21 @@ debhelper-examples:pkg-plugin-dir=${ext:debhelper-examples:pkg-lib-dir}/plugins
 # And variables that depend on variables that are package specific variables
 # (I think you get the point, but it is useful for testing)
 debhelper-examples:pkg-plugin-baz-dir=${ext:debhelper-examples:pkg-plugin-dir}/baz
+
+# Example of an architecture dependent expansion
+# ([arch!=all] is also valid)
+[arch=all] debhelper-examples:baz-feature-basedir=/usr/share/baz
+[default]  debhelper-examples:baz-feature-basedir=/usr/lib/${DEB_HOST_MULTIARCH}/baz
+
+# ... which we can expand on - e.g. with a package specific variable
+debhelper-examples:baz-feature-pkgdir=${ext:debhelper-examples:baz-feature-basedir}/${package}
+
+# Conditional variables do not have to have a [default] clause
+# Attempting to expand this variable in an arch:any package context will trigger an
+# error.
+[arch=all] debhelper-examples:only-available-on-arch-all=/usr/share/baz/all
+
+# Conditional variables do not have to have a [default] clause
+# Attempting to expand this variable in an arch:all package context will trigger an
+# error.
+[arch!=all] debhelper-examples:only-available-on-arch-any=/usr/share/baz/any

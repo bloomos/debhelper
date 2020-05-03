@@ -110,6 +110,22 @@ my @SUBST_TEST_OK = (
 		{'package' => 'bar'},
 	],
 
+	# Externally provided conditional package specific variables (for package debhelper)
+	[
+		'${ext:debhelper-examples:baz-feature-pkgdir}',
+		'/usr/share/baz/debhelper',
+		{'package' => 'debhelper'},
+	],
+	[
+		'${ext:debhelper-examples:baz-feature-basedir}',
+		'/usr/share/baz',
+		{'package' => 'debhelper'},
+	],
+	[
+		'${ext:debhelper-examples:only-available-on-arch-all}',
+		'/usr/share/baz/all',
+		{'package' => 'debhelper'},
+	],
 );
 
 each_compat_subtest {
