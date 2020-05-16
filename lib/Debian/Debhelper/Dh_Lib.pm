@@ -2928,18 +2928,88 @@ sub perl_cross_incdir {
 	return $incdir;
 }
 
-{
-	my %packages_by_buildlabel;
-	sub packages_by_buildlabel {
-		return \%packages_by_buildlabel if %packages_by_buildlabel;
+sub _validate_build_label {
+	my ($package, $label) = @_;
+	if ($label =~ m/^[a-zA-Z][a-zA-Z0-9-]+$/) {
+		return;
+	}
+	warning("Build labels match \"^[a-zA-Z][a-zA-Z0-9-]+\$\" OR be a single reference of the format \"{{<pkg>}}\"");
+	error("Error parsing X-DH-Buildlabels field for ${package} on part \"${label}\"");
+}
+
+
+sub packages_by_buildlabel {
+	my (%pkg2labels, $first_packge_with_label);
+	state %packages_by_buildlabel;
+	state $_loaded = 0;
+	return \%packages_by_buildlabel if $_loaded;
+	for my $pkg (getpackages()) {
+		my (@labels, @filtered_labels);
+		my $pkg_label_raw = package_dh_option($pkg, 'buildlabels');
+		next if not defined($pkg_label_raw);
+		$first_packge_with_label = $pkg if not defined($first_packge_with_label);
+		if ($pkg_label_raw =~ m/^[{][{]  (${Debian::Debhelper::Dh_Lib::PKGNAME_REGEX})  [}][}]$/x) {
+			my $target_pkg = $1;
+			if (not exists($pkg2labels{$target_pkg})) {
+				my $reason = "${target_pkg} is not defined in debian/control";
+				if (is_known_package($target_pkg)) {
+					if (package_dh_option($target_pkg, 'buildlabels')) {
+						$reason = "Forward references not supported (have ${target_pkg} reference ${pkg} instead)";
+					} else {
+						$reason = "${target_pkg} does not have a X-DH-Buildlabels field";
+					}
+				}
+				error("Invalid build label reference for ${pkg}: ${reason}");
+			}
+			@labels = @{$pkg2labels{$target_pkg}};
+			push(@labels, BUILD_LABEL_NONE) if not @labels;
+		} elsif (index($pkg_label_raw, '{') > -1) {
+			my $reason = "Invalid reference format (\"{{<pkg>}}\") or use of reserved \"{\" in label name";
+			if ($pkg_label_raw =~ m/[^{\s]\s*[{]/ || $pkg_label_raw =~ m/[}]\s*[^{\s]/) {
+				$reason = "A reference (\"{{<pkg>}}\") cannot be combined with other labels or other references";
+			} elsif ($pkg_label_raw =~ m/[}]\s*[{]/) {
+				$reason = "A most one reference (\"{{<pkg>}}\") can be used in a X-DH-Buildlabels field";
+			}
+			error("Invalid build label reference for ${pkg}: ${reason}");
+		} else {
+			@labels = split(' ', $pkg_label_raw);
+		}
+		if (!@labels) {
+			error("${pkg} has an empty X-DH-Buildlabels.  If ${pkg} should not have any builds, then use \"none\""
+				. " as label");
+		}
+		@filtered_labels = grep { $_ ne BUILD_LABEL_NONE } @labels;
+		if (scalar(@filtered_labels) != scalar(@labels) && (@filtered_labels || scalar(@labels) > 1)) {
+			error("${pkg} has an invalid combination of X-DH-Buildlabels: The \"none\" label must appear alone if used");
+		}
+		for my $pkg_label (@filtered_labels) {
+			_validate_build_label($pkg, $pkg_label);
+			push(@{$packages_by_buildlabel{$pkg_label}}, $pkg);
+		}
+		$pkg2labels{$pkg} = \@filtered_labels;
+	}
+	if (%pkg2labels) {
+		my $errors = 0;
 		for my $pkg (getpackages()) {
-			my $pkg_label_raw = package_dh_option($pkg, 'buildlabels') // BUILD_LABEL_NONE;
-			for my $pkg_label (split(' ', $pkg_label_raw)) {
-				push(@{$packages_by_buildlabel{$pkg_label}}, $pkg);
+			if (not exists($pkg2labels{$pkg})) {
+				warning("${pkg} does not have an X-DH-Buildlabels");
+				$errors = 1;
 			}
 		}
-		return \%packages_by_buildlabel;
+		if ($errors) {
+			warning();
+			warning("If multiple packages should have the same X-DH-Buildlabels value, you can use a reference like:");
+			warning("    X-DH-Buildlabels: {{${first_packge_with_label}}}");
+			warning("Which will expand to the labels that ${first_packge_with_label} has (in this case: \""
+				. join(' ', $pkg2labels{$first_packge_with_label}->@*) . '")');
+			warning();
+			warning("On the other hand, if you copy-pasted X-DH-Buildlabels from somewhere and have no idea");
+			warning("what it does, then please read \"man 7 debhelper\" first.");
+			error("Either all packages must have or none of the packages may have a X-DH-Buildlabels field");
+		}
 	}
+	$_loaded = 1;
+	return \%packages_by_buildlabel;
 }
 
 
