@@ -18,21 +18,38 @@ my @commands_controlled_by_deb_build_options = (
 	$include_if_compat_X_or_newer->(13, ['dh_auto_test', 'nocheck'], ['dh_dwz', 'nostrip'], ['dh_strip', 'nostrip']),
 );
 
+my @unique_build_labels = sort(keys(%{Debian::Debhelper::Dh_Lib::packages_by_buildlabel()}));
+
+my $build_command = sub {
+	my ($cmd) = @_;
+
+	if (@unique_build_labels) {
+		return map {
+			"${cmd}/$_"
+		} @unique_build_labels;
+	} else {
+		return $cmd;
+	}
+};
+
 my @bd_minimal = qw{
 	dh_testdir
 };
 my @bd = (@bd_minimal, qw{
 	dh_update_autotools_config
-	dh_auto_configure
-	dh_auto_build
-	dh_auto_test
-});
+},
+	$build_command->('dh_auto_configure'),
+	$build_command->('dh_auto_build'),
+	$build_command->('dh_auto_test'),
+);
 my @i = (qw{
 	dh_testroot
 	dh_prep
 	dh_installdirs
-	dh_auto_install
+},
+	$build_command->('dh_auto_install'),
 
+qw{
 	dh_install
 	dh_installdocs
 	dh_installchangelogs
@@ -92,10 +109,10 @@ my @b=qw{
 _add_sequence('build', SEQUENCE_ARCH_INDEP_SUBSEQUENCES, @bd);
 _add_sequence('install', SEQUENCE_ARCH_INDEP_SUBSEQUENCES, to_rules_target("build"), @i);
 _add_sequence('binary', SEQUENCE_ARCH_INDEP_SUBSEQUENCES, to_rules_target("install"), @b);
-_add_sequence('clean', SEQUENCE_NO_SUBSEQUENCES, @bd_minimal, qw{
-	dh_auto_clean
+_add_sequence('clean', SEQUENCE_NO_SUBSEQUENCES, @bd_minimal, (
+	$build_command->('dh_auto_clean'), qw{
 	dh_clean
-});
+}));
 
 for my $command (@obsolete_command) {
 	declare_command_obsolete($command);

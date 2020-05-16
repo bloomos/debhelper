@@ -29,7 +29,8 @@ use Debian::Debhelper::Dh_Lib qw(
 	getpackages
 	load_log
 	package_is_arch_all
-    pkgfile
+	pkgfile
+	process_pkg
 	rm_files
 	tmpdir
 	warning
@@ -458,6 +459,7 @@ sub check_for_obsolete_commands {
 			my $addon_name = $Debian::Debhelper::DH::SequenceState::obsolete_command{$command};
 			error("The addon ${addon_name} claimed that $command was obsolete, but it is not!?");
 		}
+		# FIXME: Ensure build labels are consistently present or absent in hook targets
 	}
 	for my $command (sort(keys(%Debian::Debhelper::DH::SequenceState::obsolete_command))) {
 		for my $prefix (qw(execute_before_ execute_after_ override_)) {
@@ -501,7 +503,8 @@ sub run_sequence_command_and_exit_on_failure {
 sub run_hook_target {
 	my ($target_stem, $min_compat_level, $command, $packages, @opts) = @_;
 	my @todo = @{$packages};
-	foreach my $override_type (undef, "arch", "indep") {
+	my @variants = index($command, '/') == -1 ? (undef, "arch", "indep") : (undef);
+	foreach my $override_type (@variants) {
 		@todo = _run_injected_rules_target($target_stem, $override_type, $min_compat_level, $command, \@todo, @opts);
 	}
 	return @todo;
@@ -657,27 +660,13 @@ sub run_through_command_sequence {
 	# Now run the commands in the sequence.
 	foreach my $i (0 .. $stoppoint) {
 		my $command = $full_sequence->[$i];
-
+		my $orig_command = $command;
+		my $label;
 		# Figure out which packages need to run this command.
-		my (@todo, @opts);
-		my @filtered_packages = _active_packages_for_command($command, $all_packages, $arch_packages, $indep_packages);
-
-		foreach my $package (@filtered_packages) {
-			if (($startpoint->{$package}//0) > $i ||
-				$logged->{$package}{$full_sequence->[$i]}) {
-				push(@opts, "-N$package");
-			}
-			else {
-				push(@todo, $package);
-			}
-		}
-		next unless @todo;
-		push(@opts, @{$options});
-
+		my (@todo, @opts, @full_todo);
 		my $rules_target = extract_rules_target_name($command);
 		error("Internal error: $command is a rules target, but it is not supported to be!?") if defined($rules_target);
-
-		if (my $stamp_file = _stamp_target($command)) {
+		if (my $stamp_file = _stamp_target($orig_command)) {
 			my %seen;
 			print "   create-stamp " . escape_shell($stamp_file) . "\n";
 
@@ -694,16 +683,40 @@ sub run_through_command_sequence {
 			}
 			close($fd) or error("close($stamp_file) failed: $!");
 			next;
+		} elsif (index($command, '/') > -1) {
+			my %active_packages = map { $_ => 1 } _active_packages_for_command($command, $all_packages, $arch_packages, $indep_packages);
+			my $label2pkgs = Debian::Debhelper::Dh_Lib::packages_by_buildlabel();
+			($command, $label) = split('/', $command, 2);
+			push(@opts, "--buildlabel=${label}");
+			# Determine if we need this step based on the packages associated with the build.
+			# If any of the packages are built, we run the step.
+			@todo = grep {
+				exists($active_packages{$_})
+			} @{$label2pkgs->{$label}};
+		} else {
+			my @filtered_packages = _active_packages_for_command($command, $all_packages, $arch_packages,
+																 $indep_packages);
+			foreach my $package (@filtered_packages) {
+				if (($startpoint->{$package} // 0) > $i ||
+					$logged->{$package}{$full_sequence->[$i]}) {
+					push(@opts, "-N$package");
+				}
+				else {
+					push(@todo, $package);
+				}
+			}
 		}
+		next unless @todo;
+		push(@opts, @{$options});
 
-		my @full_todo = @todo;
-		run_hook_target("execute_before_${command}", 10, $command, \@full_todo, @opts);
+		@full_todo = @todo;
+		run_hook_target("execute_before_${orig_command}", 10, $orig_command, \@full_todo, @opts);
 
 		# Check for override targets in debian/rules, and run instead of
 		# the usual command. (The non-arch-specific override is tried first,
 		# for simplest semantics; mixing it with arch-specific overrides
 		# makes little sense.)
-		@todo = run_hook_target("override_${command}", undef, $command, \@full_todo, @opts);
+		@todo = run_hook_target("override_${orig_command}", undef, $orig_command, \@full_todo, @opts);
 
 		if (@todo and not _can_skip_command($command, @todo)) {
 			# No need to run the command for any packages handled by the
@@ -724,7 +737,7 @@ sub run_through_command_sequence {
 			}
 		}
 
-		run_hook_target("execute_after_${command}", 10, $command, \@full_todo, @opts);
+		run_hook_target("execute_after_${orig_command}", 10, $orig_command, \@full_todo, @opts);
 	}
 }
 

@@ -534,7 +534,10 @@ if ($sequence eq 'debian/rules' ||
 	exit 0;
 }
 
-
+# packages_by_buildlabel also does some validation of X-DH-Buildlabels.
+# Do that before loading the root-sequence as the error looks nicer here
+# then if it is causes a "failure to load" of the root-sequence
+Debian::Debhelper::Dh_Lib::packages_by_buildlabel();
 load_sequence_addon('root-sequence', SEQUENCE_TYPE_BOTH);
 
 
