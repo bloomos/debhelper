@@ -964,7 +964,7 @@ sub default_sourcedir {
 	my $label_raw = package_dh_option($package, 'buildlabels') // BUILD_LABEL_NONE;
 	# The first label decides the default source directory
 	my $label = (split(' ', $label_raw, 2))[0];
-	my $label_file = "debian/.debhelper/_buildlabels/${label}/install-dir";
+	my $label_file = dh_buildlabel_related_file($label, 'destdir', 0);
 	if (-f $label_file) {
 		my $dest_dir;
 		open(my $fd, '<', $label_file) or error("open($label_file): $!");
@@ -975,7 +975,6 @@ sub default_sourcedir {
 		return $dest_dir;
 	}
 	return "debian/tmp-${label}" if $label ne BUILD_LABEL_NONE;
-
 	return 'debian/tmp';
 }
 
@@ -1327,6 +1326,11 @@ sub generated_file {
 	$mkdirs //= 1;
 	install_dir($dir) if $mkdirs;
 	return $path;
+}
+
+sub dh_buildlabel_related_file {
+	my ($buildlabel, $name, $mkdirs) = @_;
+	return generated_file("_buildlabel-${buildlabel}", $name, $mkdirs);
 }
 
 # Removes a whole substvar line.

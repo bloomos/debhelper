@@ -87,11 +87,12 @@ buildsystems_init(options => {
 # If destdir is not specified, determine it automatically
 if (!$destdir) {
 	my @allpackages=getpackages();
-	if (@allpackages > 1) {
-		$destdir="debian/tmp";
+	if ($dh{BUILDLABEL} ne Debian::Debhelper::Dh_Lib::BUILD_LABEL_NONE) {
 		$destdir="debian/tmp-$dh{BUILDLABEL}" if $dh{BUILDLABEL} ne Debian::Debhelper::Dh_Lib::BUILD_LABEL_NONE;
-	}
-	else {
+		$orig_dest_dir = $destdir;
+	} elsif (@allpackages > 1) {
+		$destdir="debian/tmp";
+	} else {
 		$destdir=tmpdir($dh{MAINPACKAGE});
 	}
 } else {
@@ -108,15 +109,16 @@ if (compat(10)) {
 
 buildsystems_do("install", $destdir);
 
-my $label_dir = "debian/.debhelper/_buildlabels/$dh{BUILDLABEL}";
 if (defined($orig_dest_dir)) {
-	# only set this, if we are not using the default
-	install_dir($label_dir);
-	open(my $fd, '>', "${label_dir}/install-dir") or error("open(${label_dir}/install-dir): $!");
+	my $install_dir_file = Debian::Debhelper::Dh_Lib::dh_buildlabel_related_file($dh{BUILDLABEL}, 'destdir');
+	open(my $fd, '>', $install_dir_file) or error("open(${install_dir_file}): $!");
 	print {$fd} "$orig_dest_dir\n";
-	close($fd) or error("close(${label_dir}/install-dir): $!");
+	close($fd) or error("close(${install_dir_file}): $!");
 } else {
-	rm_files("${label_dir}/install-dir");
+	my $install_dir_file = Debian::Debhelper::Dh_Lib::dh_buildlabel_related_file($dh{BUILDLABEL}, 'destdir', 0);
+	# Remove the file if it is left-over from a "no-clean" re-run
+	local $dh{VERBOSE} = 0;  # This is an implementation detail; not need to show it to the world
+	rm_files($install_dir_file);
 }
 
 =head1 SEE ALSO
