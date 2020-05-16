@@ -177,6 +177,24 @@ sub load_all_buildsystems {
 	return @buildsystems;
 }
 
+sub _record_option_value {
+	my ($option, $value) = @_;
+	my $option_file;
+
+	if (not defined($value)) {
+		$option_file = Debian::Debhelper::Dh_Lib::dh_buildlabel_related_file($dh{BUILDLABEL}, $option, 0);
+		local $dh{VERBOSE} = 0;  # This is an implementation detail; not need to show it to the world
+		rm_files($option_file);
+		return;
+	}
+
+	$option_file = Debian::Debhelper::Dh_Lib::dh_buildlabel_related_file($dh{BUILDLABEL}, $option);
+	open(my $fd, '>', $option_file) or error("open(${option_file}): $!");
+	print {$fd} "${value}\n";
+	close($fd) or error("close(${option_file}): $!");
+	return;
+}
+
 sub buildsystems_init {
 	my %args=@_;
 
@@ -218,6 +236,11 @@ sub buildsystems_init {
 	Debian::Debhelper::Dh_Lib::setup_buildenv();
 	set_parallel($max_parallel);
 	$dh{BUILDLABEL} //= Debian::Debhelper::Dh_Lib::BUILD_LABEL_NONE;
+	if ($dh{BUILDLABEL}) {
+		_record_option_value('sourcedirectory', $opt_sourcedir);
+		_record_option_value('builddirectory', $opt_builddir);
+		_record_option_value('buildsystem', $opt_buildsys);
+	}
 }
 
 sub set_parallel {

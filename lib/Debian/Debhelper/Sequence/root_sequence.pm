@@ -38,6 +38,8 @@ my @bd_minimal = qw{
 my @bd = (@bd_minimal, qw{
 	dh_update_autotools_config
 },
+	# Clear recorded buildflags to avoid confusion for people that use -nc / no-clean builds
+	(@unique_build_labels ? to_internal_dh_instruction('reset-buildsystem-flags') : ()),
 	$build_command->('dh_auto_configure'),
 	$build_command->('dh_auto_build'),
 	$build_command->('dh_auto_test'),

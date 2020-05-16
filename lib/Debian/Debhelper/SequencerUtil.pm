@@ -17,6 +17,8 @@ use constant {
 	'UNSKIPPABLE_CLI_OPTIONS_BUILD_SYSTEM' => q(-S|--buildsystem|-D|--sourcedir|--sourcedirectory|-B|--builddir|--builddirectory),
 };
 
+my @DH_RECORDED_BUILD_SYSTEM_OPTIONS = qw(sourcedirectory builddirectory buildsystem);
+
 use Exporter qw(import);
 
 use Debian::Debhelper::Dh_Lib qw(
@@ -41,6 +43,8 @@ use Debian::Debhelper::Dh_Lib qw(
 our @EXPORT = qw(
 	extract_rules_target_name
 	to_rules_target
+	extract_internal_dh_instruction
+	to_internal_dh_instruction
 	sequence_type
 	unpack_sequence
 	rules_explicit_target
@@ -66,6 +70,11 @@ our @EXPORT = qw(
 
 our (%EXPLICIT_TARGETS, $RULES_PARSED);
 
+sub uniq {
+	my %seen;
+	return grep { !$seen{$_}++ } @_;
+}
+
 sub extract_rules_target_name {
 	my ($command) = @_;
 	if ($command =~ m{^debian/rules\s++(.++)}) {
@@ -76,6 +85,18 @@ sub extract_rules_target_name {
 
 sub to_rules_target  {
 	return 'debian/rules '.join(' ', @_);
+}
+
+sub extract_internal_dh_instruction {
+	my ($command) = @_;
+	if ($command =~ m{^[&]internal\s++(.++)}) {
+		return $1
+	}
+	return;
+}
+
+sub to_internal_dh_instruction {
+	return '&internal ' .join(' ', @_)
 }
 
 sub sequence_type {
@@ -650,6 +671,34 @@ sub parse_dh_cmd_options {
 	return;
 }
 
+sub _load_build_option {
+	my ($label, $option) = @_;
+	my $label_file = Debian::Debhelper::Dh_Lib::dh_buildlabel_related_file($label, $option, 0);
+	my $value;
+	return if not -f $label_file;
+	$value = Debian::Debhelper::Dh_Lib::_concat_slurp_script_files($label_file);
+	chomp($value);
+	return "--${option}=${value}";
+}
+
+sub _load_build_options {
+	my ($label) = @_;
+	return map {
+		_load_build_option($label, $_);
+	} @DH_RECORDED_BUILD_SYSTEM_OPTIONS;
+}
+
+sub _clear_build_options {
+	my @files;
+	my @labels = uniq(sort(keys(%{Debian::Debhelper::Dh_Lib::packages_by_buildlabel()})));
+	for my $label (@labels) {
+		push(@files, (map {
+			Debian::Debhelper::Dh_Lib::dh_buildlabel_related_file($label, $_, 0);
+		} @DH_RECORDED_BUILD_SYSTEM_OPTIONS));
+	}
+	local $dh{VERBOSE} = 0;  # This is an implementation detail; not need to show it to the world
+	rm_files(@files);
+}
 
 sub run_through_command_sequence {
 	my ($full_sequence, $startpoint, $logged, $options, $all_packages, $arch_packages, $indep_packages) = @_;
@@ -666,7 +715,14 @@ sub run_through_command_sequence {
 		my (@todo, @opts, @full_todo);
 		my $rules_target = extract_rules_target_name($command);
 		error("Internal error: $command is a rules target, but it is not supported to be!?") if defined($rules_target);
-		if (my $stamp_file = _stamp_target($orig_command)) {
+		if (my $internal_instruction = extract_internal_dh_instruction($orig_command)) {
+			if ($internal_instruction eq 'reset-buildsystem-flags') {
+				_clear_build_options();
+			} else {
+				error("Internal error: Unknown internal dh instruction");
+			}
+			next;
+		} elsif (my $stamp_file = _stamp_target($orig_command)) {
 			my %seen;
 			print "   create-stamp " . escape_shell($stamp_file) . "\n";
 
@@ -688,6 +744,7 @@ sub run_through_command_sequence {
 			my $label2pkgs = Debian::Debhelper::Dh_Lib::packages_by_buildlabel();
 			($command, $label) = split('/', $command, 2);
 			push(@opts, "--buildlabel=${label}");
+			push(@opts, _load_build_options($label));
 			# Determine if we need this step based on the packages associated with the build.
 			# If any of the packages are built, we run the step.
 			@todo = grep {
