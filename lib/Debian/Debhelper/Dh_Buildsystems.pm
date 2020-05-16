@@ -217,7 +217,7 @@ sub buildsystems_init {
 	Debian::Debhelper::Dh_Lib::init(%args);
 	Debian::Debhelper::Dh_Lib::setup_buildenv();
 	set_parallel($max_parallel);
-	$dh{BUILDLABEL} //= 'default';
+	$dh{BUILDLABEL} //= Debian::Debhelper::Dh_Lib::BUILD_LABEL_NONE;
 }
 
 sub set_parallel {
@@ -283,7 +283,7 @@ sub buildsystems_do {
 		exit 0;
 	}
 	for my $pkg (getpackages()) {
-		my $pkg_label_raw = package_dh_option($pkg, 'buildlabels') // 'default';
+		my $pkg_label_raw = package_dh_option($pkg, 'buildlabels') // Debian::Debhelper::Dh_Lib::BUILD_LABEL_NONE;
 		next if not grep { $_ eq $dh{BUILDLABEL} } split(' ', $pkg_label_raw);
 		$label_match = 0;
 		next if not process_pkg($pkg);

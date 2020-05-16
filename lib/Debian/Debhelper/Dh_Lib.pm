@@ -27,6 +27,8 @@ use constant {
 	'DH_BUILTIN_VERSION' => \'<DH_LIB_VERSION>', #'# Hi emacs.
 	# Default Package-Type / extension (must be aligned with dpkg)
 	'DEFAULT_PACKAGE_TYPE' => 'deb',
+	# Constant to simplify searching for "none" as a build label name
+	'BUILD_LABEL_NONE' => 'none',
 };
 
 
@@ -959,7 +961,7 @@ sub tmpdir {
 # use, for that package.  (Usually debian/tmp)
 sub default_sourcedir {
 	my ($package) = @_;
-	my $label_raw = package_dh_option($package, 'buildlabels') // 'default';
+	my $label_raw = package_dh_option($package, 'buildlabels') // BUILD_LABEL_NONE;
 	# The first label decides the default source directory
 	my $label = (split(' ', $label_raw, 2))[0];
 	my $label_file = "debian/.debhelper/_buildlabels/${label}/install-dir";
@@ -972,7 +974,7 @@ sub default_sourcedir {
 		chomp($dest_dir);
 		return $dest_dir;
 	}
-	return "debian/tmp-${label}" if $label ne 'default';
+	return "debian/tmp-${label}" if $label ne BUILD_LABEL_NONE;
 
 	return 'debian/tmp';
 }
@@ -2931,7 +2933,7 @@ sub perl_cross_incdir {
 	sub packages_by_buildlabel {
 		return \%packages_by_buildlabel if %packages_by_buildlabel;
 		for my $pkg (getpackages()) {
-			my $pkg_label_raw = package_dh_option($pkg, 'buildlabels') // 'default';
+			my $pkg_label_raw = package_dh_option($pkg, 'buildlabels') // BUILD_LABEL_NONE;
 			for my $pkg_label (split(' ', $pkg_label_raw)) {
 				push(@{$packages_by_buildlabel{$pkg_label}}, $pkg);
 			}

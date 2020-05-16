@@ -42,7 +42,7 @@ system selection and control options.
 Set the label for this command.  If all packages related to the chosen label is
 skipped, the command will skip the build.
 
-If omitted, the command behaves like B<--buildlabel> was set to I<default>.
+Should only be used if the package relies on the multiple builds feature.
 
 =item B<--> I<params>
 

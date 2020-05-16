@@ -55,8 +55,7 @@ system selection and control options.
 Set the label for this command.  If all packages related to the chosen label is
 skipped, the command will skip the build.
 
-If omitted, the command behaves like B<--buildlabel> was set to I<default>.  The
-I<default> buildlabel uses F<debian/tmp> as default destination directory.
+Should only be used if the package relies on the multiple builds feature.
 
 =item B<--destdir=>I<directory>
 
@@ -90,7 +89,7 @@ if (!$destdir) {
 	my @allpackages=getpackages();
 	if (@allpackages > 1) {
 		$destdir="debian/tmp";
-		$destdir="debian/tmp-$dh{BUILDLABEL}" if $dh{BUILDLABEL} ne 'default';
+		$destdir="debian/tmp-$dh{BUILDLABEL}" if $dh{BUILDLABEL} ne Debian::Debhelper::Dh_Lib::BUILD_LABEL_NONE;
 	}
 	else {
 		$destdir=tmpdir($dh{MAINPACKAGE});
