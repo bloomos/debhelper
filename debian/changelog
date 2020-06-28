@@ -7,6 +7,11 @@ debhelper (13.1.1) UNRELEASED; urgency=medium
     to replace the hardcoded value.
   * d/changelog: Clarify that dh_installman change in 13.1 related to
     #958343.
+  * dh,dh_auto_*: Change the handling of XDG_RUNTIME_DIR in compat 13.
+    It is now only set to a writable directory for dh_auto_test but
+    set to a much shorter directory avoid issues with socket lengths.
+    In all other cases, the XDG_RUNTIME_DIR is now cleared.  Thanks to
+    Simon McVittie for the report.  (Closes: #961655)
 
   [ Anel Husakovic ]
   * debhelper.7: Fix typo/grammatical errors.
