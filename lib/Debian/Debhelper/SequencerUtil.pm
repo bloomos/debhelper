@@ -81,7 +81,7 @@ sub sequence_type {
 	my ($sequence_name) = @_;
 	if ($sequence_name =~ m/-indep$/) {
 		return 'indep';
-	} elsif ($sequence_name =~ m/-arch/) {
+	} elsif ($sequence_name =~ m/-arch$/) {
 		return 'arch';
 	}
 	return 'both';
@@ -412,6 +412,11 @@ sub compute_selected_addons {
 	};
 
 	for my $request (@addon_requests) {
+		if ($request =~ m/^[+-]root[-_]sequence$/) {
+			error("Invalid request to skip the sequence \"root-sequence\": It cannot be disabled")
+				if $request =~ m/^-/;
+			error("Invalid request to load the sequence \"root-sequence\": Do not reference it directly");
+		}
 		if ($request =~ s/^[+]//) {
 			$flush_disable_cache->() if %disabled_addons;
 			push(@enabled_addons, $request) if not $enabled{$request}++;
@@ -658,7 +663,7 @@ sub run_through_command_sequence {
 		my @filtered_packages = _active_packages_for_command($command, $all_packages, $arch_packages, $indep_packages);
 
 		foreach my $package (@filtered_packages) {
-			if ($startpoint->{$package} > $i ||
+			if (($startpoint->{$package}//0) > $i ||
 				$logged->{$package}{$full_sequence->[$i]}) {
 				push(@opts, "-N$package");
 			}

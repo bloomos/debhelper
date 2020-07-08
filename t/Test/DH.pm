@@ -22,31 +22,34 @@ BEGIN {
 
 use lib "$ROOT_DIR/lib";
 
-$ENV{PATH} = "$ROOT_DIR:$ENV{PATH}" if $ENV{PATH} !~ m{\Q$ROOT_DIR\E/?:};
-$ENV{PERL5LIB} = join(':', "${ROOT_DIR}/lib", (grep { defined } $ENV{PERL5LIB}))
-    if not $ENV{PERL5LIB} or $ENV{PERL5LIB} !~ m{\Q$ROOT_DIR\E(?:/lib)?/?:};
-$ENV{DH_AUTOSCRIPTDIR} = "$ROOT_DIR/autoscripts";
-# Nothing in the tests requires root.
-$ENV{DEB_RULES_REQUIRES_ROOT} = 'no';
-# Disable colors for good measure
-$ENV{DH_COLORS} = 'never';
-$ENV{DPKG_COLORS} = 'never';
+# These should be done before Dh_lib is loaded.
+BEGIN {
+    $ENV{PATH} = "$ROOT_DIR:$ENV{PATH}" if $ENV{PATH} !~ m{\Q$ROOT_DIR\E/?:};
+    $ENV{PERL5LIB} = join(':', "${ROOT_DIR}/lib", (grep {defined} $ENV{PERL5LIB}))
+        if not $ENV{PERL5LIB} or $ENV{PERL5LIB} !~ m{\Q$ROOT_DIR\E(?:/lib)?/?:};
+    $ENV{DH_DATAFILES} = "${ROOT_DIR}/t/fixtures:${ROOT_DIR}";
+    # Nothing in the tests requires root.
+    $ENV{DEB_RULES_REQUIRES_ROOT} = 'no';
+    # Disable colors for good measure
+    $ENV{DH_COLORS} = 'never';
+    $ENV{DPKG_COLORS} = 'never';
 
-# Drop DEB_BUILD_PROFILES and DEB_BUILD_OPTIONS so they don't interfere
-delete($ENV{DEB_BUILD_PROFILES});
-delete($ENV{DEB_BUILD_OPTIONS});
+    # Drop DEB_BUILD_PROFILES and DEB_BUILD_OPTIONS so they don't interfere
+    delete($ENV{DEB_BUILD_PROFILES});
+    delete($ENV{DEB_BUILD_OPTIONS});
+};
 
 use Debian::Debhelper::Dh_Lib qw(!dirname);
 
 our @EXPORT = qw(
     each_compat_up_to_and_incl_subtest each_compat_subtest
     each_compat_from_and_above_subtest run_dh_tool
-    uid_0_test_is_ok create_empty_file readlines
+    create_empty_file readlines
     error find_script non_deprecated_compat_levels
     each_compat_from_x_to_and_incl_y_subtest
 );
 
-our ($TEST_DH_COMPAT, $ROOT_OK, $ROOT_CMD);
+our ($TEST_DH_COMPAT);
 
 my $START_DIR = getcwd();
 my $TEST_DIR;
@@ -56,12 +59,6 @@ sub run_dh_tool {
     my $compat = $TEST_DH_COMPAT;
     my $options = ref($cmd[0]) ? shift(@cmd) : {};
     my $pid;
-
-    if ($options->{'needs_root'}) {
-        BAIL_OUT('BROKEN TEST - Attempt to run "needs_root" test when not possible')
-            if not uid_0_test_is_ok();
-        unshift(@cmd, $ROOT_CMD) if defined($ROOT_CMD);
-    }
 
     $pid = fork() // BAIL_OUT("fork failed: $!");
     if (not $pid) {
@@ -88,22 +85,6 @@ sub run_dh_tool {
     waitpid($pid, 0) == $pid or BAIL_OUT("waitpid($pid) failed: $!");
     return 1 if not $?;
     return 0;
-}
-
-sub uid_0_test_is_ok {
-    return $ROOT_OK if defined($ROOT_OK);
-    my $ok = 0;
-    if ($< == 0) {
-        $ok = 1;
-    } else {
-        system('fakeroot true 2>/dev/null');
-        if ($? == 0) {
-            $ROOT_CMD = 'fakeroot';
-            $ok = 1;
-        }
-    }
-    $ROOT_OK = $ok;
-    return $ok;
 }
 
 sub _prepare_test_root {

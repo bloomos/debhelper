@@ -5,7 +5,8 @@
 # Joey Hess, GPL copyright 1997-2008.
 
 package Debian::Debhelper::Dh_Lib;
-use strict;
+
+use v5.24;
 use warnings;
 use utf8;
 
@@ -28,12 +29,47 @@ use constant {
 	'DEFAULT_PACKAGE_TYPE' => 'deb',
 };
 
+
+# The Makefile changes this if debhelper is installed in a PREFIX.
+my $prefix="/usr";
+# The Makefile changes this during install to match the actual version.
+use constant HIGHEST_STABLE_COMPAT_LEVEL => undef;
+
+# Locations we search for data files by default
+my @DATA_INC_PATH = (
+	"${prefix}/share/debhelper",
+);
+# Enable the use of DH_DATAFILES for testing purposes.
+unshift(@DATA_INC_PATH, split(':', $ENV{'DH_DATAFILES'})) if exists($ENV{'DH_DATAFILES'});
+
 use constant {
 	# Package-Type / extension for dbgsym packages
 	# TODO: Find a way to determine this automatically from the vendor
 	#  - blocked by Dpkg::Vendor having a rather high load time (for debhelper)
 	'DBGSYM_PACKAGE_TYPE' => DEFAULT_PACKAGE_TYPE,
+	# Lowest compat level supported that is not scheduled for removal.
+	# - Set to MIN_COMPAT_LEVEL when there are no pending compat removals.
+	'MIN_COMPAT_LEVEL_NOT_SCHEDULED_FOR_REMOVAL' => 7,
 };
+
+
+# Internal constants used to define limits in variable expansions.
+use constant {
+	# How many expansions are permitted in total.
+	_VAR_SUBST_EXPANSION_COUNT_LIMIT              => 50,
+	# When recursion is enabled, how many times will we expand a pattern
+	# on the same position in the string.
+	_VAR_SUBST_SAME_POSITION_RECURSION_LIMIT      => 20,
+	# Expansions are always allowed to grow up to this length regardless
+	# of original input size (provided it does not trip another limit)
+	_VAR_SUBST_EXPANSION_MIN_SUPPORTED_SIZE_LIMIT => 4096,
+	# Factor input is allowed to grow before it triggers an error
+	# (_VAR_SUBST_EXPANSION_MIN_SUPPORTED_SIZE_LIMIT overrules this for a
+	#  given input if the max size limit computed with this factor is less
+	#  than _VAR_SUBST_EXPANSION_MIN_SUPPORTED_SIZE_LIMIT)
+	_VAR_SUBST_EXPANSION_DYNAMIC_EXPANSION_FACTOR_LIMIT => 3,
+};
+
 
 use Errno qw(ENOENT EXDEV);
 use Exporter qw(import);
@@ -173,9 +209,6 @@ qw(
 
 	buildarch
 ));
-
-# The Makefile changes this if debhelper is installed in a PREFIX.
-my $prefix="/usr";
 
 my $MAX_PROCS = get_buildoption("parallel") || 1;
 my $DH_TOOL_VERSION;
@@ -615,29 +648,27 @@ sub error_exitcode {
 	}
 }
 
-{
-	my $_loaded = 0;
-	sub install_dir {
-		my @to_create = grep { not -d $_ } @_;
-		return if not @to_create;
-		if (not $_loaded) {
-			$_loaded++;
-			require File::Path;
-		}
-		verbose_print(sprintf('install -d %s', escape_shell(@to_create)))
-			if $dh{VERBOSE};
-		return 1 if $dh{NO_ACT};
-		eval {
-			File::Path::make_path(@to_create, {
-				# install -d uses 0755 (no umask), make_path uses 0777 (& umask) by default.
-				# Since we claim to run install -d, then ensure the mode is correct.
-				'chmod' => 0755,
-			});
-		};
-		if (my $err = "$@") {
-			$err =~ s/\s+at\s+\S+\s+line\s+\d+\.?\n//;
-			error($err);
-		}
+sub install_dir {
+	my @to_create = grep { not -d $_ } @_;
+	return if not @to_create;
+	state $_loaded;
+	if (not $_loaded) {
+		$_loaded++;
+		require File::Path;
+	}
+	verbose_print(sprintf('install -d %s', escape_shell(@to_create)))
+		if $dh{VERBOSE};
+	return 1 if $dh{NO_ACT};
+	eval {
+		File::Path::make_path(@to_create, {
+			# install -d uses 0755 (no umask), make_path uses 0777 (& umask) by default.
+			# Since we claim to run install -d, then ensure the mode is correct.
+			'chmod' => 0755,
+		});
+	};
+	if (my $err = "$@") {
+		$err =~ s/\s+at\s+\S+\s+line\s+\d+\.?\n//;
+		error($err);
 	}
 }
 
@@ -763,61 +794,63 @@ sub nonquiet_print {
 	my $message=shift;
 
 	if (!$dh{QUIET}) {
-		print "\t$message\n";
+		if (defined($message)) {
+			print "\t$message\n";
+		} else {
+			print "\n";
+		}
 	}
 }
 
-{
-	my $_use_color;
-	sub _color {
-		my ($msg, $color) = @_;
-		if (not defined($_use_color)) {
-			# This part is basically Dpkg::ErrorHandling::setup_color over again
-			# with some tweaks.
-			# (but the module uses Dpkg + Dpkg::Gettext, so it is very expensive
-			# to load)
-			my $mode = $ENV{'DH_COLORS'} // $ENV{'DPKG_COLORS'};
-			# Support NO_COLOR (https://no-color.org/)
-			$mode //= exists($ENV{'NO_COLOR'}) ? 'never' : 'auto';
+sub _color {
+	my ($msg, $color) = @_;
+	state $_use_color;
+	if (not defined($_use_color)) {
+		# This part is basically Dpkg::ErrorHandling::setup_color over again
+		# with some tweaks.
+		# (but the module uses Dpkg + Dpkg::Gettext, so it is very expensive
+		# to load)
+		my $mode = $ENV{'DH_COLORS'} // $ENV{'DPKG_COLORS'};
+		# Support NO_COLOR (https://no-color.org/)
+		$mode //= exists($ENV{'NO_COLOR'}) ? 'never' : 'auto';
 
-			if ($mode eq 'auto') {
-				$_use_color = 1 if -t *STDOUT or -t *STDERR;
-			} elsif ($mode eq 'always') {
-				$_use_color = 1;
-			} else {
-				$_use_color = 0;
-			}
-
-			eval {
-				require Term::ANSIColor if $_use_color;
-			};
-			if ($@) {
-				# In case of errors, skip colors.
-				$_use_color = 0;
-			}
+		if ($mode eq 'auto') {
+			$_use_color = 1 if -t *STDOUT or -t *STDERR;
+		} elsif ($mode eq 'always') {
+			$_use_color = 1;
+		} else {
+			$_use_color = 0;
 		}
-		if ($_use_color) {
-			local $ENV{'NO_COLOR'} = undef;
-			$msg = Term::ANSIColor::colored($msg, $color);
+
+		eval {
+			require Term::ANSIColor if $_use_color;
+		};
+		if ($@) {
+			# In case of errors, skip colors.
+			$_use_color = 0;
 		}
-		return $msg;
 	}
-
-	# Output an error message and die (can be caught).
-	sub error {
-		my ($message) = @_;
-		# ensure the error code is well defined.
-		$! = 255;
-		die(_color(basename($0), 'bold') . ': ' . _color('error', 'bold red') . ": $message\n");
+	if ($_use_color) {
+		local $ENV{'NO_COLOR'} = undef;
+		$msg = Term::ANSIColor::colored($msg, $color);
 	}
+	return $msg;
+}
 
-	# Output a warning.
-	sub warning {
-		my ($message) = @_;
-		$message //= '';
+# Output an error message and die (can be caught).
+sub error {
+	my ($message) = @_;
+	# ensure the error code is well defined.
+	$! = 255;
+	die(_color(basename($0), 'bold') . ': ' . _color('error', 'bold red') . ": $message\n");
+}
 
-		print STDERR _color(basename($0), 'bold') . ': ' . _color('warning', 'bold yellow') . ": $message\n";
-	}
+# Output a warning.
+sub warning {
+	my ($message) = @_;
+	$message //= '';
+
+	print STDERR _color(basename($0), 'bold') . ': ' . _color('warning', 'bold yellow') . ": $message\n";
 }
 
 # Returns the basename of the argument passed to it.
@@ -842,6 +875,7 @@ sub dirname {
 # is less than or equal to that number.
 my $compat_from_bd;
 {
+	my $check_pending_removals = get_buildoption('dherroron', '') eq 'obsolete-compat-levels' ? 1 : 0;
 	my $warned_compat = $ENV{DH_INTERNAL_TESTSUITE_SILENT_WARNINGS} ? 1 : 0;
 	my $c;
 
@@ -899,6 +933,11 @@ my $compat_from_bd;
 		if (not $nowarn) {
 			if ($c < MIN_COMPAT_LEVEL) {
 				error("Compatibility levels before ${\MIN_COMPAT_LEVEL} are no longer supported (level $c requested)");
+			}
+
+			if ($check_pending_removals and $c < MIN_COMPAT_LEVEL_NOT_SCHEDULED_FOR_REMOVAL) {
+				my $v = MIN_COMPAT_LEVEL_NOT_SCHEDULED_FOR_REMOVAL;
+				error("Compatibility levels before ${v} are scheduled for removal and DH_COMPAT_ERROR_ON_PENDING_REMOVAL was set (level $c requested)");
 			}
 
 			if ($c < LOWEST_NON_DEPRECATED_COMPAT_LEVEL && ! $warned_compat) {
@@ -1049,57 +1088,53 @@ sub pkgfilename {
 
 # Returns 1 if the package is a native debian package, null otherwise.
 # As a side effect, sets $dh{VERSION} to the version of this package.
-{
-	# Caches return code so it only needs to run dpkg-parsechangelog once.
-	my (%isnative_cache, %pkg_version);
-	
-	sub isnative {
-		my ($package) = @_;
-		my $cache_key = $package;
+sub isnative {
+	my ($package) = @_;
+	my $cache_key = $package;
 
+	state (%isnative_cache, %pkg_version);
+
+	if (exists($isnative_cache{$cache_key})) {
+		$dh{VERSION} = $pkg_version{$cache_key};
+		return $isnative_cache{$cache_key};
+	}
+
+	# Make sure we look at the correct changelog.
+	my $isnative_changelog = pkgfile($package,"changelog");
+	if (! $isnative_changelog) {
+		$isnative_changelog = "debian/changelog";
+		$cache_key = '_source';
+		# check if we looked up the default changelog
 		if (exists($isnative_cache{$cache_key})) {
 			$dh{VERSION} = $pkg_version{$cache_key};
 			return $isnative_cache{$cache_key};
 		}
+	}
 
-		# Make sure we look at the correct changelog.
-		my $isnative_changelog = pkgfile($package,"changelog");
-		if (! $isnative_changelog) {
-			$isnative_changelog = "debian/changelog";
-			$cache_key = '_source';
-			# check if we looked up the default changelog
-			if (exists($isnative_cache{$cache_key})) {
-				$dh{VERSION} = $pkg_version{$cache_key};
-				return $isnative_cache{$cache_key};
-			}
-		}
+	if (not %isnative_cache) {
+		require Dpkg::Changelog::Parse;
+	}
 
-		if (not %isnative_cache) {
-			require Dpkg::Changelog::Parse;
-		}
+	my $res = Dpkg::Changelog::Parse::changelog_parse(
+		file => $isnative_changelog,
+		compression => 0,
+	);
+	if (not defined($res)) {
+		error("No changelog entries for $package!? (changelog file: ${isnative_changelog})");
+	}
+	my $version = $res->{'Version'};
+	# Do we have a valid version?
+	if (not defined($version) or not $version->is_valid) {
+		error("changelog parse failure; invalid or missing version");
+	}
+	# Get and cache the package version.
+	$dh{VERSION} = $pkg_version{$cache_key} = $version->as_string;
 
-		my $res = Dpkg::Changelog::Parse::changelog_parse(
-			file => $isnative_changelog,
-			compression => 0,
-		);
-		if (not defined($res)) {
-			error("No changelog entries for $package!? (changelog file: ${isnative_changelog})");
-		}
-		my $version = $res->{'Version'};
-		# Do we have a valid version?
-		if (not defined($version) or not $version->is_valid) {
-			error("changelog parse failure; invalid or missing version");
-		}
-		# Get and cache the package version.
-		$dh{VERSION} = $pkg_version{$cache_key} = $version->as_string;
-
-		# Is this a native Debian package?
-		if (index($dh{VERSION}, '-') > -1) {
-			return $isnative_cache{$cache_key} = 0;
-		}
-		else {
-			return $isnative_cache{$cache_key} = 1;
-		}
+	# Is this a native Debian package?
+	if (index($dh{VERSION}, '-') > -1) {
+		return $isnative_cache{$cache_key} = 0;
+	} else {
+		return $isnative_cache{$cache_key} = 1;
 	}
 }
 
@@ -1152,11 +1187,17 @@ sub autoscript {
 		$infile="$ENV{DH_AUTOSCRIPTDIR}/$filename";
 	}
 	else {
-		if (-e "$prefix/share/debhelper/autoscripts/$filename") {
-			$infile="$prefix/share/debhelper/autoscripts/$filename";
+		for my $dir (@DATA_INC_PATH) {
+			my $path = "${dir}/autoscripts/${filename}";
+			if (-e $path) {
+				$infile = $path;
+				last;
+			}
 		}
-		else {
-			error("$prefix/share/debhelper/autoscripts/$filename does not exist");
+		if (not defined($infile)) {
+			my @dirs = map { "$_/autoscripts" } @DATA_INC_PATH;
+			unshift(@dirs, $ENV{DH_AUTOSCRIPTDIR}) if exists($ENV{DH_AUTOSCRIPTDIR});
+			error("Could not find autoscript $filename (search path: " . join(':', @dirs) . ')');
 		}
 	}
 
@@ -1414,7 +1455,7 @@ my %BUILT_IN_SUBST = (
 	'Space'        => ' ',
 	'Dollar'       => '$',
 	'Newline'      => "\n",
-	'Tab'          => "\b",
+	'Tab'          => "\t",
 );
 
 sub _variable_substitution {
@@ -1424,7 +1465,9 @@ sub _variable_substitution {
 	my $subst_count = 0;
 	my $expansion_count = 0;
 	my $current_size = length($text);
-	my $expansion_size_limit = 3 * $current_size;
+	my $expansion_size_limit = _VAR_SUBST_EXPANSION_DYNAMIC_EXPANSION_FACTOR_LIMIT * $current_size;
+	$expansion_size_limit = _VAR_SUBST_EXPANSION_MIN_SUPPORTED_SIZE_LIMIT
+		if $expansion_size_limit < _VAR_SUBST_EXPANSION_MIN_SUPPORTED_SIZE_LIMIT;
 	1 while ($text =~ s<
 			\$\{([A-Za-z0-9][-_:0-9A-Za-z]*)\}  # Match ${something} and replace it
 		>[
@@ -1434,12 +1477,12 @@ sub _variable_substitution {
 
 			if ($pos == $new_pos) {
 				# Safe-guard in case we ever implement recursive expansion
-				error("Error substituting in ${loc} (at position $pos); recursion limit while expanding \${${match}")
-					if (++$subst_count >= 20);
+				error("Error substituting in ${loc} (at position $pos); recursion limit while expanding \${${match}}")
+					if (++$subst_count >= _VAR_SUBST_SAME_POSITION_RECURSION_LIMIT);
 			} else {
 				$subst_count = 0;
 				$pos = $new_pos;
-				if (++$expansion_count >= 50) {
+				if (++$expansion_count >= _VAR_SUBST_EXPANSION_COUNT_LIMIT) {
 					error("Error substituting in ${loc}; substitution limit of ${expansion_count} reached");
 				}
 			}
@@ -1447,18 +1490,18 @@ sub _variable_substitution {
 				$value = $BUILT_IN_SUBST{$match};
 			} elsif ($match =~ m/^DEB_(?:BUILD|HOST|TARGET)_/) {
 				$value = dpkg_architecture_value($match) //
-					error(qq{Cannot expand "\${${match}}\" in ${loc} as it is not a known dpkg-architecture value});
+					error(qq{Cannot expand "\${${match}}" in ${loc} as it is not a known dpkg-architecture value});
 			} elsif ($match =~ m/^env:(.+)/) {
 				my $env_var = $1;
 				$value = $ENV{$env_var} //
 					error(qq{Cannot expand "\${${match}}" in ${loc} as the ENV variable "${env_var}" is unset});
 			}
-			error("Cannot resolve variable \${$match} in ${loc}")
+			error(qq{Cannot resolve variable "\${$match}" in ${loc}})
 				if not defined($value);
 			# We do not support recursive expansion.
 			$value =~ s/\$/\$\{\}/;
 			$current_size += length($value) - length($match) - 3;
-			if ($current_size > 4096 and $current_size > $expansion_size_limit) {
+			if ($current_size > $expansion_size_limit) {
 				error("Refusing to expand \${${match}} in ${loc} - the original input seems to grow beyond reasonable'
 						 . ' limits!");
 			}
@@ -1586,32 +1629,30 @@ sub excludefile {
         return 0;
 }
 
-{
-	my %dpkg_arch_output;
-	sub dpkg_architecture_value {
-		my $var = shift;
-		if (exists($ENV{$var})) {
-			my $value = $ENV{$var};
-			return $value if $value ne q{};
-			warning("ENV[$var] is set to the empty string.  It has been ignored to avoid bugs like #862842");
-			delete($ENV{$var});
-		}
-		if (! exists($dpkg_arch_output{$var})) {
-			# Return here if we already consulted dpkg-architecture
-			# (saves a fork+exec on unknown variables)
-			return if %dpkg_arch_output;
-
-			open(my $fd, '-|', 'dpkg-architecture')
-				or error("dpkg-architecture failed");
-			while (my $line = <$fd>) {
-				chomp($line);
-				my ($k, $v) = split(/=/, $line, 2);
-				$dpkg_arch_output{$k} = $v;
-			}
-			close($fd);
-		}
-		return $dpkg_arch_output{$var};
+sub dpkg_architecture_value {
+	my $var = shift;
+	state %dpkg_arch_output;
+	if (exists($ENV{$var})) {
+		my $value = $ENV{$var};
+		return $value if $value ne q{};
+		warning("ENV[$var] is set to the empty string.  It has been ignored to avoid bugs like #862842");
+		delete($ENV{$var});
 	}
+	if (! exists($dpkg_arch_output{$var})) {
+		# Return here if we already consulted dpkg-architecture
+		# (saves a fork+exec on unknown variables)
+		return if %dpkg_arch_output;
+
+		open(my $fd, '-|', 'dpkg-architecture')
+			or error("dpkg-architecture failed");
+		while (my $line = <$fd>) {
+			chomp($line);
+			my ($k, $v) = split(/=/, $line, 2);
+			$dpkg_arch_output{$k} = $v;
+		}
+		close($fd);
+	}
+	return $dpkg_arch_output{$var};
 }
 
 # Confusing name for hostarch
@@ -1631,33 +1672,29 @@ sub is_cross_compiling {
 	    ne dpkg_architecture_value("DEB_HOST_GNU_TYPE");
 }
 
-# Passed an arch and a list of arches to match against, returns true if matched
-{
-	my %knownsame;
+# Passed an arch and a space-separated list of arches to match against, returns true if matched
+sub samearch {
+	my $arch=shift;
+	my @archlist=split(/\s+/,shift);
+	state %knownsame;
 
-	sub samearch {
-		my $arch=shift;
-		my @archlist=split(/\s+/,shift);
-	
-		foreach my $a (@archlist) {
-			if (exists $knownsame{$arch}{$a}) {
-				return 1 if $knownsame{$arch}{$a};
-				next;
-			}
-
-			require Dpkg::Arch;
-			if (Dpkg::Arch::debarch_is($arch, $a)) {
-				return $knownsame{$arch}{$a}=1;
-			}
-			else {
-				$knownsame{$arch}{$a}=0;
-			}
+	foreach my $a (@archlist) {
+		if (exists $knownsame{$arch}{$a}) {
+			return 1 if $knownsame{$arch}{$a};
+			next;
 		}
-	
-		return 0;
-	}
-}
 
+		require Dpkg::Arch;
+		if (Dpkg::Arch::debarch_is($arch, $a)) {
+			return $knownsame{$arch}{$a}=1;
+		}
+		else {
+			$knownsame{$arch}{$a}=0;
+		}
+	}
+
+	return 0;
+}
 
 
 # Returns a list of packages in the control file.
@@ -1698,14 +1735,17 @@ sub getpackages {
 	return @{$packages_by_type{$type}};
 }
 
+sub _strip_spaces {
+	my ($v) = @_;
+	$v =~ s/^\s++//;
+	$v =~ s/\s++$//;
+	return $v;
+}
+
 sub _parse_debian_control {
-	my $package="";
-	my $arch="";
-	my $section="";
 	my $valid_pkg_re = qr{^${PKGNAME_REGEX}$}o;
-	my ($package_type, $multiarch, %seen, @profiles, $source_section,
-		$included_in_build_profile, $cross_type, $cross_target_arch,
-		%bd_fields, $bd_field_value, %seen_fields, $fd);
+	my (%seen, @profiles, $source_section, $cross_target_arch, %field_values,
+		$field_name, %bd_fields, $bd_field_value, %seen_fields, $fd);
 	if (exists $ENV{'DEB_BUILD_PROFILES'}) {
 		@profiles=split /\s+/, $ENV{'DEB_BUILD_PROFILES'};
 	}
@@ -1726,12 +1766,15 @@ sub _parse_debian_control {
 				error("Continuation line seen before first stanza in debian/control (line $.)");
 			}
 			# Continuation line
+			s/^\s[.]?//;
 			push(@{$bd_field_value}, $_) if $bd_field_value;
+			# Ensure it is not completely empty or the code below will assume the paragraph ended
+			$_ = '.' if not $_;
 		} elsif (not $_ and not %seen_fields) {
 			# Ignore empty lines before first stanza
 			next;
 		} elsif ($_) {
-			my ($field_name, $value);
+			my ($value);
 
 			if (m/^($DEB822_FIELD_REGEX):\s*(.*)/o) {
 				($field_name, $value) = (lc($1), $2);
@@ -1839,6 +1882,7 @@ sub _parse_debian_control {
 	}
 
 	%seen_fields = ();
+	$field_name = undef;
 
 	while (<$fd>) {
 		chomp;
@@ -1852,18 +1896,20 @@ sub _parse_debian_control {
 			$_  = '';
 		}
 
-
 		if (/^\s/) {
 			# Continuation line
 			if (not %seen_fields) {
 				error("Continuation line seen outside stanza in debian/control (line $.)");
 			}
+			s/^\s[.]?//;
+			$field_values{$field_name} .= ' ' . $_;
+			# Ensure it is not completely empty or the code below will assume the paragraph ended
+			$_ = '.' if not $_;
 		} elsif (not $_ and not %seen_fields) {
 			# Ignore empty lines before first stanza
 			next;
 		} elsif ($_) {
-			my ($field_name, $value);
-
+			my ($value);
 			if (m/^($DEB822_FIELD_REGEX):\s*(.*)/o) {
 				($field_name, $value) = (lc($1), $2);
 				if (exists($seen_fields{$field_name})) {
@@ -1871,16 +1917,37 @@ sub _parse_debian_control {
 					error("${field_name}-field appears twice in the same stanza of debian/control. " .
 						  "First time on line $first_time, second time: $.");
 				}
+
+				if ($field_name =~ m/^(?:x[bc]*-)?package-type$/) {
+					# Normalize variants into the main "Package-Type" field
+					$field_name = 'package-type';
+					if (exists($seen_fields{$field_name})) {
+						my $package = _strip_spaces($field_values{'package'} // '');
+						my $help = "(issue seen prior \"Package\"-field)";
+						$help = "for package ${package}" if $package;
+						error("Multiple definitions of (X-)Package-Type in line $. ${help}");
+					}
+				}
 				$seen_fields{$field_name} = $.;
+				$field_values{$field_name} = $value;
 				$bd_field_value = undef;
 			} else {
 				# Invalid file
 				error("Parse error in debian/control, line $., read: $_");
 			}
+		}
+		if (!$_ or eof) { # end of stanza.
+			if (%field_values) {
+				my $package = _strip_spaces($field_values{'package'} // '');
+				my $build_profiles = $field_values{'build-profiles'};
+				my $included_in_build_profile = 1;
+				my $arch = _strip_spaces($field_values{'architecture'} // '');
+				my $cross_type = _strip_spaces($field_values{'x-dh-build-for-type'} // 'host');
 
-			if ($field_name eq 'package') {
-				$package = $value;
 				# Detect duplicate package names in the same control file.
+				if ($package eq '') {
+					error("Binary paragraph ending on line $. is missing mandatory \"Package\"-field");
+				}
 				if (! $seen{$package}) {
 					$seen{$package}=1;
 				} else {
@@ -1890,54 +1957,36 @@ sub _parse_debian_control {
 					error('Package-field must be a valid package name, ' .
 						  "got: \"${package}\", should match \"${valid_pkg_re}\"");
 				}
-				$included_in_build_profile=1;
-			} elsif ($field_name eq 'section') {
-				$section = $value;
-			} elsif ($field_name eq 'architecture') {
-				$arch = $value;
-			} elsif ($field_name =~ m/^(?:x[bc]*-)?package-type$/) {
-				if (defined($package_type)) {
-					my $help = "(issue seen prior \"Package\"-field)";
-					$help = "for package ${package}" if $package;
-					error("Multiple definitions of (X-)Package-Type in line $. ${help}");
-				}
-				$package_type = $value;
-			} elsif ($field_name eq 'multi-arch') {
-				$multiarch = $value;
-			} elsif ($field_name eq 'x-dh-build-for-type') {
-				$cross_type = $value;
 				if ($cross_type ne 'host' and $cross_type ne 'target') {
-					error("Unknown value of X-DH-Build-For-Type \"$cross_type\" at debian/control:$.");
+					error("Unknown value of X-DH-Build-For-Type \"$cross_type\" for package $package");
 				}
-			} elsif ($field_name eq 'build-profiles') {
-				# rely on libdpkg-perl providing the parsing functions
-				# because if we work on a package with a Build-Profiles
-				# field, then a high enough version of dpkg-dev is needed
-				# anyways
-				my $build_profiles = $value;
-				eval {
-					require Dpkg::BuildProfiles;
-					my @restrictions=Dpkg::BuildProfiles::parse_build_profiles($build_profiles);
-					if (@restrictions) {
-						$included_in_build_profile = Dpkg::BuildProfiles::evaluate_restriction_formula(
-							\@restrictions,
-							\@profiles);
-					}
-				};
-				if ($@) {
-					error("The control file has a Build-Profiles field. Requires libdpkg-perl >= 1.17.14");
-				}
-			}
-		}
-		if (!$_ or eof) { # end of stanza.
-			if ($package) {
-				$package_types{$package}=$package_type // 'deb';
-				$package_arches{$package}=$arch;
-				$package_multiarches{$package} = $multiarch;
-				$package_sections{$package} = $section || $source_section;
-				$cross_type //= 'host';
+
+				$package_types{$package} = _strip_spaces($field_values{'package-type'} // 'deb');
+				$package_arches{$package} = $arch;
+				$package_multiarches{$package} = _strip_spaces($field_values{'multi-arch'} // '');
+				$package_sections{$package} = _strip_spaces($field_values{'section'} // $source_section);;
 				$package_cross_type{$package} = $cross_type;
 				push(@{$packages_by_type{'all-listed-in-control-file'}}, $package);
+
+				if (defined($build_profiles)) {
+					eval {
+						# rely on libdpkg-perl providing the parsing functions
+						# because if we work on a package with a Build-Profiles
+						# field, then a high enough version of dpkg-dev is needed
+						# anyways
+						require Dpkg::BuildProfiles;
+						my @restrictions = Dpkg::BuildProfiles::parse_build_profiles($build_profiles);
+						if (@restrictions) {
+							$included_in_build_profile = Dpkg::BuildProfiles::evaluate_restriction_formula(
+								\@restrictions,
+								\@profiles);
+						}
+					};
+					if ($@) {
+						error("The control file has a Build-Profiles field. Requires libdpkg-perl >= 1.17.14");
+					}
+				}
+
 				if ($included_in_build_profile) {
 					if ($arch eq 'all') {
 						push(@{$packages_by_type{'indep'}}, $package);
@@ -1960,11 +2009,7 @@ sub _parse_debian_control {
 					}
 				}
 			}
-			$package='';
-			$package_type=undef;
-			$cross_type = undef;
-			$arch='';
-			$section='';
+			%field_values = ();
 			%seen_fields = ();
 		}
 	}
@@ -1975,21 +2020,18 @@ sub _parse_debian_control {
 # - Takes an optional keyword; if passed, this will return true if the keyword is listed in R^3 (Rules-Requires-Root)
 # - If the optional keyword is omitted or not present in R^3 and R^3 is not 'binary-targets', then returns false
 # - Returns true otherwise (i.e. keyword is in R^3 or R^3 is 'binary-targets')
-{
-	my %rrr;
-	sub should_use_root {
-		my ($keyword) = @_;
-		my $rrr_env = $ENV{'DEB_RULES_REQUIRES_ROOT'} // 'binary-targets';
-		$rrr_env =~ s/^\s++//;
-		$rrr_env =~ s/\s++$//;
-		return 0 if $rrr_env eq 'no';
-		return 1 if $rrr_env eq 'binary-targets';
-		return 0 if not defined($keyword);
+sub should_use_root {
+	my ($keyword) = @_;
+	my $rrr_env = $ENV{'DEB_RULES_REQUIRES_ROOT'} // 'binary-targets';
+	$rrr_env =~ s/^\s++//;
+	$rrr_env =~ s/\s++$//;
+	return 0 if $rrr_env eq 'no';
+	return 1 if $rrr_env eq 'binary-targets';
+	return 0 if not defined($keyword);
 
-		%rrr = map { $_ => 1 } split(' ', $rrr_env) if not %rrr;
-		return 1 if exists($rrr{$keyword});
-		return 0;
-	}
+	state %rrr = map { $_ => 1 } split(' ', $rrr_env);
+	return 1 if exists($rrr{$keyword});
+	return 0;
 }
 
 # Returns the "gain root command" as a list suitable for passing as a part of the command to "doit()"
@@ -2103,16 +2145,10 @@ sub is_udeb {
 	return $package_types{$package} eq 'udeb';
 }
 
-{
-	my %packages_to_process;
-
-	sub process_pkg {
-		my ($package) = @_;
-		if (not %packages_to_process) {
-			%packages_to_process = map { $_ => 1 } @{$dh{DOPACKAGES}};
-		}
-		return $packages_to_process{$package} // 0;
-	}
+sub process_pkg {
+	my ($package) = @_;
+	state %packages_to_process = map { $_ => 1 } @{$dh{DOPACKAGES}};
+	return $packages_to_process{$package} // 0;
 }
 
 # Only useful for dh(1)
@@ -2428,12 +2464,11 @@ sub setup_buildenv {
 }
 
 sub setup_home_and_xdg_dirs {
-	my $home_dir = generated_file('_source', 'home', 0);
-	my $xdg_rundir = generated_file('_source', 'xdg-runtime-dir', 0);
-	my $creating_rundir = -d $xdg_rundir ? 0 : 1;
+	require Cwd;
+	my $cwd = Cwd::getcwd();
+	my $home_dir = join('/', $cwd, generated_file('_source', 'home', 0));
 	my @paths = (
 		$home_dir,
-		$xdg_rundir,
 	);
 	my @clear_env = qw(
 		XDG_CACHE_HOME
@@ -2441,16 +2476,13 @@ sub setup_home_and_xdg_dirs {
 		XDG_CONFIG_HOME
 		XDG_DATA_HOME
 		XDG_DATA_DIRS
+		XDG_RUNTIME_DIR
 	);
 	install_dir(@paths);
-	if ($creating_rundir) {
-		chmod(0700, $xdg_rundir) == 1 or warning("chmod(0700, \"$xdg_rundir\") failed: $! (ignoring)");
-	}
 	for my $envname (@clear_env) {
 		delete($ENV{$envname});
 	}
 	$ENV{'HOME'} = $home_dir;
-	$ENV{'XDG_RUNTIME_DIR'} = $xdg_rundir;
 	return;
 }
 
@@ -2488,20 +2520,25 @@ sub set_buildflags {
 
 # Gets a DEB_BUILD_OPTIONS option, if set.
 sub get_buildoption {
-	my $wanted=shift;
+	my ($wanted, $default) = @_;
 
-	return undef unless exists $ENV{DEB_BUILD_OPTIONS};
+	return $default if not exists($ENV{DEB_BUILD_OPTIONS});
 
 	foreach my $opt (split(/\s+/, $ENV{DEB_BUILD_OPTIONS})) {
 		# currently parallel= is the only one with a parameter
 		if ($opt =~ /^parallel=(-?\d+)$/ && $wanted eq 'parallel') {
 			return $1;
-		}
-		elsif ($opt eq $wanted) {
+		} elsif ($opt =~ m/^dherroron=(\S*)$/ && $wanted eq 'dherroron') {
+			my $value = $1;
+			if ($value ne 'obsolete-compat-levels') {
+				warning("Unknown value \"${value}\" as parameter for \"dherrron\" seen in DEB_BUILD_OPTIONS");
+			}
+			return $value;
+		} elsif ($opt eq $wanted) {
 			return 1;
 		}
 	}
-	return undef;
+	return $default;
 }
 
 # Returns true if DEB_BUILD_PROFILES lists the given profile.
@@ -2594,6 +2631,7 @@ sub restore_file_on_clean {
 }
 
 sub restore_all_files {
+	my ($clear_index) = @_;
 	my $bucket_index = 'debian/.debhelper/bucket/index';
 	my $bucket_dir = 'debian/.debhelper/bucket/files';
 
@@ -2615,6 +2653,7 @@ sub restore_all_files {
 		rename_path("${bucket_file}.tmp", $stored_file);
 	}
 	close($fd);
+	rm_files($bucket_index) if $clear_index;
 	return;
 }
 
@@ -2867,41 +2906,37 @@ sub perl_cross_incdir {
 	return $incdir;
 }
 
-{
-	my %known_packages;
-	sub is_known_package {
-		my ($package) = @_;
-		%known_packages = map { $_ => 1 } getpackages() if not %known_packages;
-		return 1 if exists($known_packages{$package});
-		return 0
-	}
-
-	sub assert_opt_is_known_package {
-		my ($package, $method) = @_;
-		if (not is_known_package($package)) {
-			error("Requested unknown package $package via $method, expected one of: " . join(' ', getpackages()));
-		}
-		return 1;
-	}
+sub is_known_package {
+	my ($package) = @_;
+	state %known_packages = map { $_ => 1 } getpackages();
+	return 1 if exists($known_packages{$package});
+	return 0
 }
 
-{
-	my $_disable_file_seccomp;
-	sub _internal_optional_file_args {
-		if (not defined($_disable_file_seccomp)) {
-			my $consider_disabling_seccomp = 0;
-			if ($ENV{'FAKEROOTKEY'} or ($ENV{'LD_PRELOAD'}//'') =~ m/fakeroot/) {
-				$consider_disabling_seccomp = 1;
-			}
-			if ($consider_disabling_seccomp) {
-				my $has_no_sandbox = (qx_cmd('file', '--help') // '') =~ m/--no-sandbox/;
-				$consider_disabling_seccomp = 0 if not $has_no_sandbox;
-			}
-			$_disable_file_seccomp = $consider_disabling_seccomp;
-		}
-		return ('--no-sandbox') if $_disable_file_seccomp;
-		return;
+sub assert_opt_is_known_package {
+	my ($package, $method) = @_;
+	if (not is_known_package($package)) {
+		error("Requested unknown package $package via $method, expected one of: " . join(' ', getpackages()));
 	}
+	return 1;
+}
+
+
+sub _internal_optional_file_args {
+	state $_disable_file_seccomp;
+	if (not defined($_disable_file_seccomp)) {
+		my $consider_disabling_seccomp = 0;
+		if ($ENV{'FAKEROOTKEY'} or ($ENV{'LD_PRELOAD'} // '') =~ m/fakeroot/) {
+			$consider_disabling_seccomp = 1;
+		}
+		if ($consider_disabling_seccomp) {
+			my $has_no_sandbox = (qx_cmd('file', '--help') // '') =~ m/--no-sandbox/;
+			$consider_disabling_seccomp = 0 if not $has_no_sandbox;
+		}
+		$_disable_file_seccomp = $consider_disabling_seccomp;
+	}
+	return('--no-sandbox') if $_disable_file_seccomp;
+	return;
 }
 
 1

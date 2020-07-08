@@ -210,7 +210,8 @@ instances of the same text to be added to maintainer scripts.
 
 =cut
 
-$dh{RESTART_AFTER_UPGRADE} = 1 if not compat(9);
+$dh{RESTART_AFTER_UPGRADE} = '';
+$dh{NO_START} = '';
 
 init(options => {
 	"r" => \$dh{R_FLAG},
@@ -227,6 +228,10 @@ init(options => {
 	"remove-d" => \$dh{D_FLAG},
 	"no-enable" => \$dh{NO_ENABLE},
 });
+
+if ($dh{RESTART_AFTER_UPGRADE} eq '') {
+	$dh{RESTART_AFTER_UPGRADE} = 1 if not defined($dh{R_FLAG}) and $dh{NO_START} eq '';
+}
 
 # PROMISE: DH NOOP WITHOUT service tmpfile default upstart init init.d tmp(usr/lib/tmpfiles.d) tmp(etc/tmpfiles.d) cli-options(--init-script|-d|--remove-d|-o|--only-scripts)
 
