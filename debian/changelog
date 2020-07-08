@@ -1,3 +1,9 @@
+debhelper (13.2~bpo10+1) buster-backports; urgency=medium
+
+  * Rebuild for buster-backports.
+
+ -- Niels Thykier <niels@thykier.net>  Wed, 08 Jul 2020 16:22:36 +0000
+
 debhelper (13.2) unstable; urgency=medium
 
   [ Niels Thykier ]
