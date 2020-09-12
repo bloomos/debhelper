@@ -476,6 +476,107 @@ sub check_for_obsolete_commands {
 	return;
 }
 
+sub _maybe_invoke_debug_shell {
+	my ($command, @options) = @_;
+	if (get_buildoption('dhdebugshellonerror')) {
+		my $cmd = escape_shell($command, @options);
+		require File::Temp;
+		my $tmp_fd = File::Temp->new();
+		print "\n\n";
+
+		my $script_snippet = qq{#!/bin/sh
+# debhelper recovery shell command provider
+
+# Do not rely on how these commands are implemented
+dh-stop-build-with-error() {
+	exit 0
+}
+
+dh-continue-build-replay-failed-command() {
+	exit 76
+}
+
+dh-continue-build-skip-failed-command() {
+	exit 77
+}
+
+dh-help() {
+	cat <<EOF
+****************************************************************************************************************
+                                       debhelper recovery shell
+
+An error occurred while running the command
+      $cmd
+
+Recovery commands ("shell built-ins" provided in this debug shell)
+
+   * dh-help                                  - Print this help message.
+   * dh-stop-build-with-error                 - Exit shell and abort the build
+   * dh-continue-build-replay-failed-command  - Exit shell and resume build by re-running the failed command
+   * dh-continue-build-skip-failed-command    - Exit shell and resume build by skipping the failed command
+   * exit                                     - Exit shell and abort the build
+
+
+## Caveats with resuming the build ##
+
+Be advised that resuming the build is not perfect.
+
+You CAN:
+
+ * Alter any existing override or hook target.
+    - If the failed command is a call to a hook target, then replaying the hook target *will* pick up the changes.
+
+You MIGHT BE ABLE TO:
+
+ * Add or remove hook/override targets for commands not yet run.
+   - Use of explicit build targets ("build:\\n\\tdh build") can cause surprising results.
+
+You CANNOT:
+
+ * Alter the current command into a hook target.
+   - Run what you wanted to run instead and then use skip.
+ * Remove the current hook target.
+   - Run what you wanted to run instead and then use skip.
+ * Add or remove hook/override targets for commands not yet run.
+   - They might or might not be picked depending on the exact build.
+ * Alter the command line arguments passed to dh or definitions of environment variables.
+ * Go back in time.
+   - If you need to change something for a previous command, you will have to abort and start over.
+
+****************************************************************************************************************
+EOF
+}
+
+# Run the help command by default to ensure people is aware of their options.
+dh-help
+
+};
+		print {$tmp_fd} $script_snippet;
+		my $me = Debian::Debhelper::Dh_Lib::_color(basename($0), 'bold');
+		my $error_recovery = Debian::Debhelper::Dh_Lib::_color('error-recovery', 'red');
+		my $quoted_tmp_file = escape_shell($tmp_fd->filename);
+		print "${me}: ${error_recovery}: Entering debug shell as requested via DEB_BUILD_OPTIONS\n";
+		my $ret = system("bash --rcfile ${quoted_tmp_file} -i </dev/tty >/dev/tty 2>/dev/tty");
+		if ($ret) {
+			# Shell exited
+			my $exit_code = $ret >> 8;
+			if ($exit_code == 76) {
+				return 'REPLAY-COMMAND';
+			}
+			if ($exit_code == 77) {
+				return 'SKIP-COMMAND';
+			}
+			if ($exit_code != 0) {
+				warning("Debug shell (bash -i) exited with code " . (($ret >> 8) & 0xff) . " - Aborting.");
+			} else {
+				warning("Debug shell (bash -i) was killed by signal - Aborting.");
+			}
+		}
+		return 'ABORT';
+	}
+	return 'NO-SHELL';
+}
+
 sub run_sequence_command_and_exit_on_failure {
 	my ($command, @options) = @_;
 
@@ -488,11 +589,37 @@ sub run_sequence_command_and_exit_on_failure {
 	return if $dh{NO_ACT};
 
 	my $ret=system { $command } $command, @options;
-	if ($ret >> 8 != 0) {
-		exit $ret >> 8;
-	}
 	if ($ret) {
-		exit 1;
+		my $debug_shell_ret = _maybe_invoke_debug_shell($command, @options);
+		if ($debug_shell_ret ne 'NO-SHELL') {
+			my $me = Debian::Debhelper::Dh_Lib::_color(basename($0), 'bold');
+			# Reload debian/rules
+			$RULES_PARSED = 0;
+			%EXPLICIT_TARGETS = ();
+			if ($debug_shell_ret eq 'SKIP-COMMAND') {
+				my $skipped = Debian::Debhelper::Dh_Lib::_color('command-omitted', 'yellow');
+				print "${me}: ${skipped}: The call to \"${command}\" was omitted due to request via debug shell\n";
+				return;
+			}
+			if ($debug_shell_ret eq 'REPLAY-COMMAND') {
+				my $skipped = Debian::Debhelper::Dh_Lib::_color('command-replayed', 'yellow');
+				print "${me}: ${skipped}: The call to \"${command}\" was replayed due to request via debug shell\n";
+				goto \&run_sequence_command_and_exit_on_failure;
+			}
+
+			my $error = Debian::Debhelper::Dh_Lib::_color('error', 'red');
+			if ($debug_shell_ret ne 'ABORT') {
+				warning("Unsupported debug shell recovery command: ${debug_shell_ret}");
+				warning(" - Please file a bug against debhelper. Sorry for the inconvenience. :-/");
+			}
+			print "${me}: ${error}: Aborting build after debug shell\n";
+		}
+		if ($ret >> 8 != 0) {
+			exit $ret >> 8;
+		}
+		if ($ret) {
+			exit 1;
+		}
 	}
 	return;
 }
