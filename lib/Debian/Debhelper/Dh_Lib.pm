@@ -10,6 +10,11 @@ use v5.24;
 use warnings;
 use utf8;
 
+# Disable unicode_strings for now until a better solution for
+# Debian#971362 comes around.
+no feature 'unicode_strings';
+
+
 use constant {
 	# Lowest compat level supported
 	'MIN_COMPAT_LEVEL' => 5,
@@ -1589,23 +1594,7 @@ sub filedoublearray {
 
 	if (!close(DH_FARRAY_IN)) {
 		if ($x) {
-			my ($err, $proc_err) = ($!, $?);
-			error("Error closing fd/process for $file: $err") if $err;
-			# The interpreter did not like the file for some reason.
-			# Lets check if the maintainer intended it to be
-			# executable.
-			if (not is_so_or_exec_elf_file($file) and not _has_shbang_line($file)) {
-				warning("$file is marked executable but does not appear to an executable config.");
-				warning();
-				warning("If $file is intended to be an executable config file, please ensure it can");
-				warning("be run as a stand-alone script/program (e.g. \"./${file}\")");
-				warning("Otherwise, please remove the executable bit from the file (e.g. chmod -x \"${file}\")");
-				warning();
-				warning('Please see "Executable debhelper config files" in debhelper(7) for more information.');
-				warning();
-			}
-			$? = $proc_err;
-			error_exitcode("$file (executable config)");
+			_executable_dh_config_file_failed($file, $!, $?);
 		} else {
 			error("problem reading $file: $!");
 		}
@@ -2486,6 +2475,20 @@ sub setup_home_and_xdg_dirs {
 	return;
 }
 
+sub reset_buildflags {
+	eval { require Dpkg::BuildFlags };
+	if ($@) {
+		warning "unable to load build flags: $@";
+		return;
+	}
+	delete($ENV{'DH_INTERNAL_BUILDFLAGS'});
+	my $buildflags = Dpkg::BuildFlags->new();
+	foreach my $flag ($buildflags->list()) {
+		next unless $flag =~ /^[A-Z]/; # Skip flags starting with lowercase
+		delete($ENV{$flag});
+	}
+}
+
 # Sets environment variables from dpkg-buildflags. Avoids changing
 # any existing environment variables.
 sub set_buildflags {
@@ -2551,6 +2554,31 @@ sub is_build_profile_active {
 	return 0;
 }
 
+
+# Called when an executable config file failed.  It provides a more helpful error message in
+# some cases (especially when the file was not intended to be executable).
+sub _executable_dh_config_file_failed {
+	my ($source, $err, $proc_err) = @_;
+	error("Error closing fd/process for ${source}: $err") if $err;
+	# The interpreter did not like the file for some reason.
+	# Lets check if the maintainer intended it to be
+	# executable.
+	if (not is_so_or_exec_elf_file($source) and not _has_shbang_line($source)) {
+		warning("${source} is marked executable but does not appear to an executable config.");
+		warning();
+		warning("If ${source} is intended to be an executable config file, please ensure it can");
+		warning("be run as a stand-alone script/program (e.g. \"./${source}\")");
+		warning("Otherwise, please remove the executable bit from the file (e.g. chmod -x \"${source}\")");
+		warning();
+		warning('Please see "Executable debhelper config files" in debhelper(7) for more information.');
+		warning();
+	}
+	$? = $proc_err;
+	error_exitcode("${source} (executable config)");
+	return;
+}
+
+
 # install a dh config file (e.g. debian/<pkg>.lintian-overrides) into
 # the package.  Under compat 9+ it may execute the file and use its
 # output instead.
@@ -2569,8 +2597,7 @@ sub install_dh_config_file {
 			print ${tfd} $line;
 		}
 		if (!close($sfd)) {
-			error("cannot close handle from $source: $!") if $!;
-			error_exitcode($source);
+			_executable_dh_config_file_failed($source, $!, $?);
 		}
 		close($tfd) || error("cannot close $target: $!");
 		# Set the mtime (and atime) to ensure reproducibility.

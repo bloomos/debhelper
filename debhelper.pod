@@ -1242,6 +1242,10 @@ B<BUILD_RPATH_USE_ORIGIN> at its new default).  This should undo the need for
 B<LD_LIBRARY_PATH> and avoid the reproducibility issues on Linux, where B<$ORIGIN>
 is supported by the runtime linkers.
 
+=item -
+
+The tool B<dh_installsysusers> is now included in the default sequence.
+
 =back
 
 =back
@@ -1535,8 +1539,7 @@ to be removed compat levels into errors.
 This is useful for automated checking for code relying on deprecated
 compat levels that is scheduled for removal.
 
-This environment variable is intended for testing purposes; not
-production builds.
+This option is intended for testing purposes; not production builds.
 
 =item B<nostrip>
 
