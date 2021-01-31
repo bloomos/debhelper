@@ -421,7 +421,7 @@ foreach my $package (getpackages()) {
 		# To avoid issues with duplicated document IDs, we will always
 		# install to usr/share/doc-base/<packagename>.<doc_id> instead
 		# of just usr/share/doc-base/<packagename> or just
-		# usr/share/doc-base/<doc_id>.
+		# usr/share/doc-base/<doc_id>. See #525821 and #980903.
 		install_file("debian/$fn",
 					 "$tmp/usr/share/doc-base/$package.$doc_ids{$fn}");
 	}
