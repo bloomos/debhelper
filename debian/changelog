@@ -1,3 +1,9 @@
+debhelper (13.3.4~exp) UNRELEASED; urgency=medium
+
+  * Try to add the Salsa CI Debian pipeline to get autopkgtests on Salsa.
+
+ -- Axel Beckert <abe@debian.org>  Thu, 04 Feb 2021 00:22:19 +0100
+
 debhelper (13.3.3) unstable; urgency=medium
 
   [ Niels Thykier ]

@@ -29,3 +29,6 @@ tests-unstable:
     - apt-get update
     - apt-get build-dep -y .
     - dpkg-buildpackage -us -uc -tc
+
+include:
+  - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/recipes/debian.yml
