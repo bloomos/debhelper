@@ -32,3 +32,9 @@ tests-unstable:
 
 include:
   - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/recipes/debian.yml
+
+autopkgtest-more:
+    extends: .test-autopkgtest
+    before_script:
+      - apt-get update
+      - apt-get install -y libtest-pod-perl bmake dh-golang
